@@ -30,10 +30,10 @@ namespace crimson {
     // by-reference.
     using Cost = uint32_t;
 
-    enum class PhaseType : uint8_t { reservation, priority };
+    enum class PhaseType : uint8_t { reservation, burst, priority };
 
     inline std::ostream& operator<<(std::ostream& out, const PhaseType& phase) {
-      out << (PhaseType::reservation == phase ? "reservation" : "priority");
+      out << (PhaseType::reservation == phase ? "reservation" : PhaseType::burst == phase ? "burst": "priority");
       return out;
     }
 

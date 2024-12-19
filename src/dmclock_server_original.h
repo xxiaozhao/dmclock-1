@@ -26,15 +26,6 @@
 
 #include <assert.h>
 
-//咯咯哒
-#include <ostream>
-#include <string>
-#include <fstream>
-#include <algorithm> // for std::fill
-#include <cmath> // for std::abs
-#include <variant>
-
-
 #include <cmath>
 #include <memory>
 #include <map>
@@ -82,11 +73,6 @@ namespace crimson {
     constexpr auto aggressive_check_time = std::chrono::seconds(5);
     constexpr unsigned standard_erase_max = 2000;
 
-	using Clock = std::chrono::steady_clock;
-	using TimePoint = Clock::time_point;
-	using Duration = std::chrono::milliseconds;
-        using MarkPoint = std::pair<TimePoint,Counter>;
-
     enum class AtLimit {
       // requests are delayed until the limit is restored
       Wait,
@@ -108,52 +94,10 @@ namespace crimson {
     // for RejectThreshold (which implies AtLimit::Reject)
     using AtLimitParam = boost::variant<AtLimit, RejectThreshold>;
 
-//    struct ClientInfo {
-//      double reservation;  // minimum
-//      double weight;       // proportional
-//      double limit;        // maximum
-//
-//      // multiplicative inverses of above, which we use in calculations
-//      // and don't want to recalculate repeatedly
-//      double reservation_inv;
-//      double weight_inv;
-//      double limit_inv;
-//
-//      // order parameters -- min, "normal", max
-//      ClientInfo(double _reservation, double _weight, double _limit) {
-//	update(_reservation, _weight, _limit);
-//      }
-// 
-//      inline void update(double _reservation, double _weight, double _limit) {
-//       reservation = _reservation;
-//       weight = _weight;
-//       limit = _limit;
-//       reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
-//       weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
-//       limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
-//      }
-//
-//      friend std::ostream& operator<<(std::ostream& out,
-//				      const ClientInfo& client) {
-//	out <<
-//	  "{ ClientInfo:: r:" << client.reservation <<
-//	  " w:" << std::fixed << client.weight <<
-//	  " l:" << std::fixed << client.limit <<
-//	  " 1/r:" << std::fixed << client.reservation_inv <<
-//	  " 1/w:" << std::fixed << client.weight_inv <<
-//	  " 1/l:" << std::fixed << client.limit_inv <<
-//	  " }";
-//	return out;
-//      }
-//    }; // class ClientInfo
-
-     struct ClientInfo {
+    struct ClientInfo {
       double reservation;  // minimum
       double weight;       // proportional
       double limit;        // maximum
-	  size_t total_bandwidth; 	//一个周期内的总带宽
-	  size_t b0;		   // 最大突发带宽
-	  Duration duration;   //分配时长
 
       // multiplicative inverses of above, which we use in calculations
       // and don't want to recalculate repeatedly
@@ -165,34 +109,11 @@ namespace crimson {
       ClientInfo(double _reservation, double _weight, double _limit) {
 	update(_reservation, _weight, _limit);
       }
-
-
-		ClientInfo(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _b0) {
-	update_burst(_reservation, _weight, _limit, _total_bandwidth, _b0);
-      }
-
-
-
+ 
       inline void update(double _reservation, double _weight, double _limit) {
        reservation = _reservation;
        weight = _weight;
        limit = _limit;
-	   total_bandwidth = 0;
-	   b0 = 0;
-	   duration = std::chrono::milliseconds(0);
-       reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
-       weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
-       limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
-      }
-
-
-	   inline void update_burst(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _b0) {
-       reservation = _reservation;
-       weight = _weight;
-       limit = _limit;
-	   total_bandwidth = _total_bandwidth;
-	   b0 = _b0;
-	   duration = std::chrono::milliseconds(_total_bandwidth/_b0);
        reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
        weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
        limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
@@ -211,7 +132,6 @@ namespace crimson {
 	return out;
       }
     }; // class ClientInfo
-
 
 
     struct RequestTag {
@@ -379,10 +299,10 @@ namespace crimson {
 
     protected:
 
-//      using Clock = std::chrono::steady_clock;
-//      using TimePoint = Clock::time_point;
-//      using Duration = std::chrono::milliseconds;
-//      using MarkPoint = std::pair<TimePoint,Counter>;
+      using Clock = std::chrono::steady_clock;
+      using TimePoint = Clock::time_point;
+      using Duration = std::chrono::milliseconds;
+      using MarkPoint = std::pair<TimePoint,Counter>;
 
       enum class ReadyOption {ignore, lowers, raises};
 
@@ -428,138 +348,7 @@ namespace crimson {
         }
       };
 
-
-     class Epoch {
-	friend PriorityQueueBase;
-
-	TimePoint begin_time;
-	int num = 0;
-	Duration period;
-
-	public:
-
-	Epoch() :
-		begin_time(Clock::now()),
-		num(0),
-		period(std::chrono::milliseconds(1000))
-		{
-		// empty
-		}
-
-
-		void update_epoch(){
-			begin_time = Clock::now();
-			num ++ ;
-		}
-
-		void update_period(Duration duration){
-				period = duration;
-				epoch_job->try_update(period);
-		}
-
-
-//	friend std::ostream& operator<<(std::ostream& out, const Epoch& e) {
-//	out << "{ Epoch:: TimePoint:" << e.begin_time << " num:" <<
-//		e.num <<  " period:" <<  e.period << " }";
-//	return out;
-//	}
-	}; // class Epoch
-
-
-
     public:
-
-         	// 枚举类型
-	enum class ClientType {
-		ordinary,
-		burst
-	};
-
-	//客户端的周期
-	class ClientEpoch {
-		friend PriorityQueueBase;
-
-		size_t b0 = 0;			//分配的带宽
-		size_t burst_client_count = 0;	//开始计时的突发客户端数量
-		int processed_requests = 0;		//计时开始后累计处理的请求数量
-
-
-		Duration duration;			//分配时长
-		Duration cum_duration;		//周期内累计时长
-		TimePoint begin_time;		//开始计时时间
-		bool is_cumulative;			//是否在计时
-		bool is_limit;				//是否达到限制时长
-
-		public:
-
-//		// 构造函数————未指定分配时长
-//		ClientEpoch() :
-//			duration(std::chrono::milliseconds(1000)),				//先固定后删除，打通ClientRec构造函数以及，实际构造的参数后删除
-//			cum_duration(std::chrono::milliseconds(0)),
-//			begin_time(Clock::now()),
-//			is_cumulative(false),
-//			is_limit(false)
-//			{
-//			// empty
-//			}
-
-		// 构造函数————指定分配时长
-		ClientEpoch(const ClientInfo* client_info, size_t burst_client_counts) :
-
-			b0(client_info->b0),
-			burst_client_count(burst_client_counts),
-			processed_requests(0),
-
-
-			duration(client_info->duration),
-			cum_duration(std::chrono::milliseconds(0)),
-			begin_time(Clock::now()),
-			is_cumulative(false),
-			is_limit(false)
-			{
-			// empty
-			}
-
-
-			// 开始计时
-			void start(size_t current_burst_client_count){
-				begin_time = Clock::now();
-				is_cumulative = true;
-				processed_requests = 0;
-				burst_client_count = current_burst_client_count;
-
-			}
-
-			//是否达到限制时间要求
-			bool is_fulfill(size_t current_burst_client_count){
-
-				//处理请求数+1
-				processed_requests++;
-
-				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
-				{
-					end();
-					return true;
-				}else if(is_cumulative == false){
-					start(current_burst_client_count);
-				}
-					return false;
-			}
-
-			// 结束计时
-			void end(){
-				cum_duration += std::chrono::duration_cast<Duration>(Clock::now() - begin_time);
-				is_cumulative = false;
-				if (cum_duration > duration)
-					is_limit = true;
-			}
-		}; // class ClientEpoch
-
-
-		// 数据类型 ClientData，存储 `ClientEpoch` 或者 `ClientType`
-	using ClientData = std::variant<ClientEpoch, ClientType>;
-
-
 
       // NOTE: ClientRec is in the "public" section for compatibility
       // with g++ 4.8.4, which complains if it's not. By g++ 6.3.1
@@ -579,10 +368,6 @@ namespace crimson {
 	c::IndIntruHeapData   reserv_heap_data {};
 	c::IndIntruHeapData   lim_heap_data {};
 	c::IndIntruHeapData   ready_heap_data {};
-
-	//突发堆
- 	c::IndIntruHeapData  burst_lim_heap_data {};
-	c::IndIntruHeapData  burst_ready_heap_data {};
 #if USE_PROP_HEAP
 	c::IndIntruHeapData   prop_heap_data {};
 #endif
@@ -595,28 +380,6 @@ namespace crimson {
 	uint32_t              cur_rho;
 	uint32_t              cur_delta;
 
-
-
-	ClientData client_date;
-
-	ClientRec(C _client,
-		  const ClientInfo* _info,
-		  Counter current_tick,
-		  size_t burst_client_count) :
-	  client(_client),
-	  prev_tag(0.0, 0.0, 0.0, TimeZero),
-	  info(_info),
-	  idle(true),
-	  last_tick(current_tick),
-	  cur_rho(1),
-	  cur_delta(1),
-	  client_date(ClientEpoch(_info, burst_client_count))		// 初始化为 ClientEpoch 对象
-	{
-	  // empty
-	}
-
-
-
 	ClientRec(C _client,
 		  const ClientInfo* _info,
 		  Counter current_tick) :
@@ -626,8 +389,7 @@ namespace crimson {
 	  idle(true),
 	  last_tick(current_tick),
 	  cur_rho(1),
-	  cur_delta(1),
-	  client_date(ClientType::ordinary)
+	  cur_delta(1)
 	{
 	  // empty
 	}
@@ -746,7 +508,7 @@ namespace crimson {
       enum class NextReqType { returning, future, none };
 
       // specifies which queue next request will get popped from
-      enum class HeapId { reservation, ready, burst };
+      enum class HeapId { reservation, ready };
 
       // this is returned from next_req to tell the caller the situation
       struct NextReq {
@@ -821,20 +583,6 @@ namespace crimson {
 	    any_removed = true;
 	  }
 	}
-
-
-	//从突发堆里面过滤数据
-	for (auto i : burst_client_map) {
-	  bool modified =
-	    i.second->remove_by_req_filter(filter_accum, visit_backwards);
-	  if (modified) {
-	    burst_limit_heap.adjust(*i.second);
-	    burst_ready_heap.adjust(*i.second);
-	    any_removed = true;
-	  }
-	}
-
-
 	return any_removed;
       }
 
@@ -845,53 +593,16 @@ namespace crimson {
       }
 
 
-//      void remove_by_client(const C& client,
-//			    bool reverse = false,
-//			    std::function<void (RequestRef&&)> accum = request_sink) {
-//	DataGuard g(data_mtx);
-//
-//	auto i = client_map.find(client);
-//
-//	if (i == client_map.end()) return;
-//
-//	if (reverse) {
-//	  for (auto j = i->second->requests.rbegin();
-//	       j != i->second->requests.rend();
-//	       ++j) {
-//	    accum(std::move(j->request));
-//	  }
-//	} else {
-//	  for (auto j = i->second->requests.begin();
-//	       j != i->second->requests.end();
-//	       ++j) {
-//	    accum(std::move(j->request));
-//	  }
-//	}
-//
-//	i->second->requests.clear();
-//
-//	resv_heap.adjust(*i->second);
-//	limit_heap.adjust(*i->second);
-//	ready_heap.adjust(*i->second);
-//#if USE_PROP_HEAP
-//	prop_heap.adjust(*i->second);
-//#endif
-//      }
-
-
-
-       void remove_by_client(const C& client,
+      void remove_by_client(const C& client,
 			    bool reverse = false,
 			    std::function<void (RequestRef&&)> accum = request_sink) {
 	DataGuard g(data_mtx);
 
 	auto i = client_map.find(client);
-	auto k = burst_client_map.find(client);
 
-	if (i == client_map.end() && k == burst_client_map.end()) return;
-	else if(i != client_map.end())
-	{
-		if (reverse) {
+	if (i == client_map.end()) return;
+
+	if (reverse) {
 	  for (auto j = i->second->requests.rbegin();
 	       j != i->second->requests.rend();
 	       ++j) {
@@ -913,33 +624,7 @@ namespace crimson {
 #if USE_PROP_HEAP
 	prop_heap.adjust(*i->second);
 #endif
-
-	}else if(k != burst_client_map.end())
-	{
-		i=k;
-		if (reverse) {
-	  for (auto j = i->second->requests.rbegin();
-	       j != i->second->requests.rend();
-	       ++j) {
-	    accum(std::move(j->request));
-	  }
-	} else {
-	  for (auto j = i->second->requests.begin();
-	       j != i->second->requests.end();
-	       ++j) {
-	    accum(std::move(j->request));
-	  }
-	}
-
-	i->second->requests.clear();
-
-	burst_limit_heap.adjust(*i->second);
-	burst_ready_heap.adjust(*i->second);
-	}
-
       }
-
-
 
 
       unsigned get_heap_branching_factor() const {
@@ -965,16 +650,12 @@ namespace crimson {
       }
 
 
-	      friend std::ostream& operator<<(std::ostream& out,
+      friend std::ostream& operator<<(std::ostream& out,
 				      const PriorityQueueBase& q) {
 	std::lock_guard<decltype(q.data_mtx)> guard(q.data_mtx);
 
 	out << "{ PriorityQueue::";
 	for (const auto& c : q.client_map) {
-	  out << "  { client:" << c.first << ", record:" << *c.second <<
-	    " }";
-	}
-	for (const auto& c : q.burst_client_map) {
 	  out << "  { client:" << c.first << ", record:" << *c.second <<
 	    " }";
 	}
@@ -985,11 +666,6 @@ namespace crimson {
 	  out << " { ready_top:" << ready << " }";
 	  const auto& limit = q.limit_heap.top();
 	  out << " { limit_top:" << limit << " }";
-	}else if(!q.burst_ready_heap.empty()){
-	  const auto& burst_ready = q.burst_ready_heap.top();
-	  out << " { burst_ready_top:" << burst_ready << " }";
-	  const auto& burst_limit = q.burst_limit_heap.top();
-	  out << " { burst_limit_top:" << burst_limit << " }";
 	} else {
 	  out << " HEAPS-EMPTY";
 	}
@@ -997,7 +673,6 @@ namespace crimson {
 
 	return out;
       }
-
 
       // for debugging
       void display_queues(std::ostream& out,
@@ -1091,15 +766,11 @@ namespace crimson {
       struct DataGuard { DataGuard(int) {} };
 #else
       mutable std::mutex data_mtx;
-      mutable std::mutex burst_data_mtx;
       using DataGuard = std::lock_guard<decltype(data_mtx)>;
-      using BurstDataGuard = std::lock_guard<decltype(burst_data_mtx)>;
 #endif
 
       // stable mapping between client ids and client queues
       std::map<C,ClientRecRef> client_map;
-      // 突发客户端映射
-      std::map<C,ClientRecRef> burst_client_map;
 
       c::IndIntruHeap<ClientRecRef,
 		      ClientRec,
@@ -1132,26 +803,6 @@ namespace crimson {
 				    true>,
 		      B> ready_heap;
 
-      	// 突发堆
-	c::IndIntruHeap<ClientRecRef,
-		      ClientRec,
-		      &ClientRec::burst_lim_heap_data,
-		      ClientCompare<&RequestTag::limit,
-				    ReadyOption::lowers,					//限制措施后边再调
-				    false>,
-		      B> burst_limit_heap;
-
-	c::IndIntruHeap<ClientRecRef,
-		      ClientRec,
-		      &ClientRec::burst_ready_heap_data,
-		      ClientCompare<&RequestTag::proportion,
-				    ReadyOption::raises,
-				    true>,
-		      B> burst_ready_heap;
-
-
-
-
       AtLimit          at_limit;
       RejectThreshold  reject_threshold = 0;
 
@@ -1164,15 +815,10 @@ namespace crimson {
       // every request creates a tick
       Counter tick = 0;
 
-      // 咯咯哒
-      Epoch epoch;
-
       // performance data collection
       size_t reserv_sched_count = 0;
       size_t prop_sched_count = 0;
       size_t limit_break_sched_count = 0;
-      size_t burst_sched_count = 0;
-      size_t current_burst_client_count = 0;
 
       Duration                  idle_age;
       Duration                  erase_age;
@@ -1186,7 +832,6 @@ namespace crimson {
       // NB: All threads declared at end, so they're destructed first!
 
       std::unique_ptr<RunEvery> cleaning_job;
-      std::unique_ptr<RunEvery> epoch_job;
 
       // helper function to return the value of a variant if it matches the
       // given type T, or a default value of T otherwise
@@ -1223,10 +868,6 @@ namespace crimson {
 	  std::unique_ptr<RunEvery>(
 	    new RunEvery(check_time,
 			 std::bind(&PriorityQueueBase::do_clean, this)));
-	epoch_job =
-	  std::unique_ptr<RunEvery>(
-	    new RunEvery(epoch.period,
-			 std::bind(&PriorityQueueBase::do_period, this)));
       }
 
 
@@ -1278,241 +919,112 @@ namespace crimson {
       // AtLimit::Reject, requests that would exceed their limit are rejected
       // with EAGAIN, and the queue will not take ownership of the given
       // 'request' argument
-
-      	// 请求添加接口
-	int do_add_request(RequestRef&& request,
+      int do_add_request(RequestRef&& request,
 			 const C& client_id,
 			 const ReqParams& req_params,
 			 const Time time,
-			 const Cost cost = 1u,
-			 const bool is_burst=false) {
+			 const Cost cost = 1u) {
+	++tick;
 
-			// 如果是非突发请求
-			if(is_burst == false)
-			{
-				do_add_request_ordinary(std::move(request), client_id, req_params, time, cost);
+        auto insert = client_map.emplace(client_id, ClientRecRef{});
+        if (insert.second) {
+          // new client entry
+	  const ClientInfo* info = client_info_f(client_id);
+	  auto client_rec = std::make_shared<ClientRec>(client_id, info, tick);
+	  resv_heap.push(client_rec);
+#if USE_PROP_HEAP
+	  prop_heap.push(client_rec);
+#endif
+	  limit_heap.push(client_rec);
+	  ready_heap.push(client_rec);
+	  insert.first->second = std::move(client_rec);
+	}
 
-				return 0;
-			}
-			else
-			{
-				do_add_request_burst(std::move(request), client_id, req_params, time, cost);
+	// for convenience, we'll create a reference to the shared pointer
+	ClientRec& client = *insert.first->second;
 
-				return 0;
-			}
+	if (client.idle) {
+	  // We need to do an adjustment so that idle clients compete
+	  // fairly on proportional tags since those tags may have
+	  // drifted from real-time. Either use the lowest existing
+	  // proportion tag -- O(1) -- or the client with the lowest
+	  // previous proportion tag -- O(n) where n = # clients.
+	  //
+	  // So we don't have to maintain a proportional queue that
+	  // keeps the minimum on proportional tag alone (we're
+	  // instead using a ready queue), we'll have to check each
+	  // client.
+	  //
+	  // The alternative would be to maintain a proportional queue
+	  // (define USE_PROP_TAG) and do an O(1) operation here.
 
+	  // Was unable to confirm whether equality testing on
+	  // std::numeric_limits<double>::max() is guaranteed, so
+	  // we'll use a compile-time calculated trigger that is one
+	  // third the max, which should be much larger than any
+	  // expected organic value.
+	  constexpr double lowest_prop_tag_trigger =
+	    std::numeric_limits<double>::max() / 3.0;
+
+	  double lowest_prop_tag = std::numeric_limits<double>::max();
+	  for (auto const &c : client_map) {
+	    // don't use ourselves (or anything else that might be
+	    // listed as idle) since we're now in the map
+	    if (!c.second->idle) {
+	      double p;
+	      // use either lowest proportion tag or previous proportion tag
+	      if (c.second->has_request()) {
+		p = c.second->next_request().tag.proportion +
+		  c.second->prop_delta;
+	      } else {
+	        p = c.second->get_req_tag().proportion + c.second->prop_delta;
+	      }
+
+	      if (p < lowest_prop_tag) {
+		lowest_prop_tag = p;
+	      }
+	    }
+	  }
+
+	  // if this conditional does not fire, it
+	  if (lowest_prop_tag < lowest_prop_tag_trigger) {
+	    client.prop_delta = lowest_prop_tag - time;
+	  }
+	  client.idle = false;
+	} // if this client was idle
+
+	RequestTag tag = initial_tag(TagCalc{}, client, req_params, time, cost);
+
+	if (at_limit == AtLimit::Reject &&
+            tag.limit > time + reject_threshold) {
+	  // if the client is over its limit, reject it here
+	  return EAGAIN;
+	}
+
+	client.add_request(tag, std::move(request));
+	if (1 == client.requests.size()) {
+	  // NB: can the following 4 calls to adjust be changed
+	  // promote? Can adding a request ever demote a client in the
+	  // heaps?
+	  resv_heap.adjust(client);
+	  limit_heap.adjust(client);
+	  ready_heap.adjust(client);
+#if USE_PROP_HEAP
+	  prop_heap.adjust(client);
+#endif
+	}
+
+	client.cur_rho = req_params.rho;
+	client.cur_delta = req_params.delta;
+
+	resv_heap.adjust(client);
+	limit_heap.adjust(client);
+	ready_heap.adjust(client);
+#if USE_PROP_HEAP
+	prop_heap.adjust(client);
+#endif
+	return 0;
       } // do_add_request
-
-
-
-		// 普通请求处理逻辑
-	  int do_add_request_ordinary(RequestRef&& request,
-			 const C& client_id,
-			 const ReqParams& req_params,
-			 const Time time,
-			 const Cost cost = 1u) {
-			++tick;
-
-				auto insert = client_map.emplace(client_id, ClientRecRef{});
-				if (insert.second) {
-				// new client entry
-			const ClientInfo* info = client_info_f(client_id);
-			auto client_rec = std::make_shared<ClientRec>(client_id, info, tick);
-			resv_heap.push(client_rec);
-		#if USE_PROP_HEAP
-			prop_heap.push(client_rec);
-		#endif
-			limit_heap.push(client_rec);
-			ready_heap.push(client_rec);
-			insert.first->second = std::move(client_rec);
-			}
-
-			// for convenience, we'll create a reference to the shared pointer
-			ClientRec& client = *insert.first->second;
-
-			if (client.idle) {
-			// We need to do an adjustment so that idle clients compete
-			// fairly on proportional tags since those tags may have
-			// drifted from real-time. Either use the lowest existing
-			// proportion tag -- O(1) -- or the client with the lowest
-			// previous proportion tag -- O(n) where n = # clients.
-			//
-			// So we don't have to maintain a proportional queue that
-			// keeps the minimum on proportional tag alone (we're
-			// instead using a ready queue), we'll have to check each
-			// client.
-			//
-			// The alternative would be to maintain a proportional queue
-			// (define USE_PROP_TAG) and do an O(1) operation here.
-
-			// Was unable to confirm whether equality testing on
-			// std::numeric_limits<double>::max() is guaranteed, so
-			// we'll use a compile-time calculated trigger that is one
-			// third the max, which should be much larger than any
-			// expected organic value.
-			constexpr double lowest_prop_tag_trigger =
-				std::numeric_limits<double>::max() / 3.0;
-
-			double lowest_prop_tag = std::numeric_limits<double>::max();
-			for (auto const &c : client_map) {
-				// don't use ourselves (or anything else that might be
-				// listed as idle) since we're now in the map
-				if (!c.second->idle) {
-				double p;
-				// use either lowest proportion tag or previous proportion tag
-				if (c.second->has_request()) {
-				p = c.second->next_request().tag.proportion +
-				c.second->prop_delta;
-				} else {
-					p = c.second->get_req_tag().proportion + c.second->prop_delta;
-				}
-
-				if (p < lowest_prop_tag) {
-				lowest_prop_tag = p;
-				}
-				}
-			}
-
-			// if this conditional does not fire, it
-			if (lowest_prop_tag < lowest_prop_tag_trigger) {
-				client.prop_delta = lowest_prop_tag - time;
-			}
-			client.idle = false;
-			} // if this client was idle
-
-			RequestTag tag = initial_tag(TagCalc{}, client, req_params, time, cost);
-
-			if (at_limit == AtLimit::Reject &&
-					tag.limit > time + reject_threshold) {
-			// if the client is over its limit, reject it here
-			return EAGAIN;
-			}
-
-			client.add_request(tag, std::move(request));
-			if (1 == client.requests.size()) {
-			// NB: can the following 4 calls to adjust be changed
-			// promote? Can adding a request ever demote a client in the
-			// heaps?
-			resv_heap.adjust(client);
-			limit_heap.adjust(client);
-			ready_heap.adjust(client);
-		#if USE_PROP_HEAP
-			prop_heap.adjust(client);
-		#endif
-			}
-
-			client.cur_rho = req_params.rho;
-			client.cur_delta = req_params.delta;
-
-			resv_heap.adjust(client);
-			limit_heap.adjust(client);
-			ready_heap.adjust(client);
-		#if USE_PROP_HEAP
-			prop_heap.adjust(client);
-		#endif
-			return 0;
-      } // do_add_request_ordinary
-
-
-		// 突发请求添加逻辑
-	  int do_add_request_burst(RequestRef&& request,
-			 const C& client_id,
-			 const ReqParams& req_params,
-			 const Time time,
-			 const Cost cost = 1u) {
-			++tick;
-
-				auto insert = burst_client_map.emplace(client_id, ClientRecRef{});
-				if (insert.second) {
-				// new client entry
-			const ClientInfo* info = client_info_f(client_id);
-			auto client_rec = std::make_shared<ClientRec>(client_id, info, tick, current_burst_client_count);
-			burst_limit_heap.push(client_rec);
-			burst_ready_heap.push(client_rec);
-			insert.first->second = std::move(client_rec);
-			}
-
-			// for convenience, we'll create a reference to the shared pointer
-			ClientRec& client = *insert.first->second;
-
-			if (client.idle) {
-			// We need to do an adjustment so that idle clients compete
-			// fairly on proportional tags since those tags may have
-			// drifted from real-time. Either use the lowest existing
-			// proportion tag -- O(1) -- or the client with the lowest
-			// previous proportion tag -- O(n) where n = # clients.
-			//
-			// So we don't have to maintain a proportional queue that
-			// keeps the minimum on proportional tag alone (we're
-			// instead using a ready queue), we'll have to check each
-			// client.
-			//
-			// The alternative would be to maintain a proportional queue
-			// (define USE_PROP_TAG) and do an O(1) operation here.
-
-			// Was unable to confirm whether equality testing on
-			// std::numeric_limits<double>::max() is guaranteed, so
-			// we'll use a compile-time calculated trigger that is one
-			// third the max, which should be much larger than any
-			// expected organic value.
-			constexpr double lowest_prop_tag_trigger =
-				std::numeric_limits<double>::max() / 3.0;
-
-			double lowest_prop_tag = std::numeric_limits<double>::max();
-			for (auto const &c : burst_client_map) {
-				// don't use ourselves (or anything else that might be
-				// listed as idle) since we're now in the map
-				if (!c.second->idle) {
-				double p;
-				// use either lowest proportion tag or previous proportion tag
-				if (c.second->has_request()) {
-				p = c.second->next_request().tag.proportion +
-				c.second->prop_delta;
-				} else {
-					p = c.second->get_req_tag().proportion + c.second->prop_delta;
-				}
-
-				if (p < lowest_prop_tag) {
-				lowest_prop_tag = p;
-				}
-				}
-			}
-
-			// if this conditional does not fire, it
-			if (lowest_prop_tag < lowest_prop_tag_trigger) {
-				client.prop_delta = lowest_prop_tag - time;
-			}
-			client.idle = false;
-			} // if this client was idle
-
-			RequestTag tag = initial_tag(TagCalc{}, client, req_params, time, cost);
-
-			if (at_limit == AtLimit::Reject &&
-					tag.limit > time + reject_threshold) {
-			// if the client is over its limit, reject it here
-			return EAGAIN;
-			}
-
-			client.add_request(tag, std::move(request));
-			if (1 == client.requests.size()) {
-			// NB: can the following 4 calls to adjust be changed
-			// promote? Can adding a request ever demote a client in the
-			// heaps?
-			burst_limit_heap.adjust(client);
-			burst_ready_heap.adjust(client);
-			}
-
-			client.cur_rho = req_params.rho;
-			client.cur_delta = req_params.delta;
-
-			burst_limit_heap.adjust(client);
-			burst_ready_heap.adjust(client);
-
-			return 0;
-      } // do_add_request_burst
-
-
-
 
       // data_mtx must be held by caller
       void update_next_tag(DelayedTagCalc delayed, ClientRec& top,
@@ -1556,35 +1068,12 @@ namespace crimson {
 
 	update_next_tag(TagCalc{}, top, tag);
 
-//	resv_heap.demote(top);
-//	limit_heap.adjust(top);
-//#if USE_PROP_HEAP
-//	prop_heap.demote(top);
-//#endif
-//	ready_heap.demote(top);
-
-
-	// 出队后只调整对应堆即可
-	if (auto cli_epoch = std::get_if<ClientEpoch>(&top.client_date)) {
-
-
-			// 如果该突发客户端没有后续请求，则暂停计数
-			if(!top.has_request())
-			{
-				std::get<ClientEpoch>(top.client_date).end();
-			}		
-			burst_limit_heap.adjust(top);
-			burst_ready_heap.demote(top);
-
-	}else{
-			resv_heap.demote(top);
-			limit_heap.adjust(top);
-		#if USE_PROP_HEAP
-			prop_heap.demote(top);
-		#endif
-			ready_heap.demote(top);
-	}
-
+	resv_heap.demote(top);
+	limit_heap.adjust(top);
+#if USE_PROP_HEAP
+	prop_heap.demote(top);
+#endif
+	ready_heap.demote(top);
 
 	// process
 	process(top.client, request_cost, request);
@@ -1631,99 +1120,13 @@ namespace crimson {
       }
 
 
-//      // data_mtx should be held when called
-//      NextReq do_next_request(Time now) {
-//	// if reservation queue is empty, all are empty (i.e., no
-//	// active clients)
-//	if(resv_heap.empty()) {
-//	  return NextReq::none();
-//	}
-//
-//	// try constraint (reservation) based scheduling
-//
-//	auto& reserv = resv_heap.top();
-//	if (reserv.has_request() &&
-//	    reserv.next_request().tag.reservation <= now) {
-//	  return NextReq(HeapId::reservation);
-//	}
-//
-//	// no existing reservations before now, so try weight-based
-//	// scheduling
-//
-//	// all items that are within limit are eligible based on
-//	// priority
-//	auto limits = &limit_heap.top();
-//	while (limits->has_request() &&
-//	       !limits->next_request().tag.ready &&
-//	       limits->next_request().tag.limit <= now) {
-//	  limits->next_request().tag.ready = true;
-//	  ready_heap.promote(*limits);
-//	  limit_heap.demote(*limits);
-//
-//	  limits = &limit_heap.top();
-//	}
-//
-//	auto& readys = ready_heap.top();
-//	if (readys.has_request() &&
-//	    readys.next_request().tag.ready &&
-//	    readys.next_request().tag.proportion < max_tag) {
-//	  return NextReq(HeapId::ready);
-//	}
-//
-//	// if nothing is schedulable by reservation or
-//	// proportion/weight, and if we allow limit break, try to
-//	// schedule something with the lowest proportion tag or
-//	// alternatively lowest reservation tag.
-//	if (at_limit == AtLimit::Allow) {
-//	  if (readys.has_request() &&
-//	      readys.next_request().tag.proportion < max_tag) {
-//	    return NextReq(HeapId::ready);
-//	  } else if (reserv.has_request() &&
-//		     reserv.next_request().tag.reservation < max_tag) {
-//	    return NextReq(HeapId::reservation);
-//	  }
-//	}
-//
-//	// nothing scheduled; make sure we re-run when next
-//	// reservation item or next limited item comes up
-//
-//	Time next_call = TimeMax;
-//	if (resv_heap.top().has_request()) {
-//	  next_call =
-//	    min_not_0_time(next_call,
-//			   resv_heap.top().next_request().tag.reservation);
-//	}
-//	if (limit_heap.top().has_request()) {
-//	  const auto& next = limit_heap.top().next_request();
-//	  assert(!next.tag.ready || max_tag == next.tag.proportion);
-//	  next_call = min_not_0_time(next_call, next.tag.limit);
-//	}
-//	if (next_call < TimeMax) {
-//	  return NextReq(next_call);
-//	} else {
-//	  return NextReq::none();
-//	}
-//      } // do_next_request
-
-
-
-        NextReq do_next_request(Time now) {
+      // data_mtx should be held when called
+      NextReq do_next_request(Time now) {
 	// if reservation queue is empty, all are empty (i.e., no
 	// active clients)
-	if(resv_heap.empty() && burst_ready_heap.empty()) {
+	if(resv_heap.empty()) {
 	  return NextReq::none();
 	}
-
-
-	// 如果预留堆有任务，先进行延迟调度和预留调度
-	if(!resv_heap.empty()){
-			// try constraint (delay) based scheduling
-
-//	auto& delay = delay_heap.top();
-//	if (delay.has_request() &&
-//	    delay.next_request().tag.delay <= now) {
-//	  return NextReq(HeapId::delay);
-//	}
 
 	// try constraint (reservation) based scheduling
 
@@ -1732,117 +1135,55 @@ namespace crimson {
 	    reserv.next_request().tag.reservation <= now) {
 	  return NextReq(HeapId::reservation);
 	}
-	}
 
-
-	// 突发调度阶段
-	if(!burst_ready_heap.empty()){
-
-		auto limits = &burst_limit_heap.top();
-		while (limits->has_request() &&
-			!limits->next_request().tag.ready &&
-			std::get<ClientEpoch>(limits->client_date).is_limit == false &&
-			limits->next_request().tag.limit <= now) {
-		limits->next_request().tag.ready = true;
-		burst_ready_heap.promote(*limits);
-		burst_limit_heap.demote(*limits);
-
-		limits = &burst_limit_heap.top();
-		}
-
-		auto& readys = burst_ready_heap.top();
-		if (readys.has_request() &&
-			readys.next_request().tag.ready &&
-			readys.next_request().tag.proportion < max_tag) {
-
-			std::get<ClientEpoch>(limits->client_date).is_fulfill(current_burst_client_count);
-
-
-		return NextReq(HeapId::burst);
-		}
-	}
-
-
-
-
-	// 权重调度阶段
 	// no existing reservations before now, so try weight-based
 	// scheduling
 
 	// all items that are within limit are eligible based on
 	// priority
-	if(!resv_heap.empty()){
-		auto limits = &limit_heap.top();
-		while (limits->has_request() &&
-			!limits->next_request().tag.ready &&
-			limits->next_request().tag.limit <= now) {
-		limits->next_request().tag.ready = true;
-		ready_heap.promote(*limits);
-		limit_heap.demote(*limits);
+	auto limits = &limit_heap.top();
+	while (limits->has_request() &&
+	       !limits->next_request().tag.ready &&
+	       limits->next_request().tag.limit <= now) {
+	  limits->next_request().tag.ready = true;
+	  ready_heap.promote(*limits);
+	  limit_heap.demote(*limits);
 
-		limits = &limit_heap.top();
-		}
-
-		auto& readys = ready_heap.top();
-		if (readys.has_request() &&
-			readys.next_request().tag.ready &&
-			readys.next_request().tag.proportion < max_tag) {
-		return NextReq(HeapId::ready);
-		}
+	  limits = &limit_heap.top();
 	}
 
+	auto& readys = ready_heap.top();
+	if (readys.has_request() &&
+	    readys.next_request().tag.ready &&
+	    readys.next_request().tag.proportion < max_tag) {
+	  return NextReq(HeapId::ready);
+	}
 
 	// if nothing is schedulable by reservation or
 	// proportion/weight, and if we allow limit break, try to
 	// schedule something with the lowest proportion tag or
 	// alternatively lowest reservation tag.
 	if (at_limit == AtLimit::Allow) {
-
-		if(!resv_heap.empty()){
-			auto& readys = ready_heap.top();
-			auto& reserv = resv_heap.top();
-			if (readys.has_request() &&
-				readys.next_request().tag.proportion < max_tag) {
-				return NextReq(HeapId::ready);
-			} else if (reserv.has_request() &&
-					reserv.next_request().tag.reservation < max_tag) {
-				return NextReq(HeapId::reservation);
-			}
-		}else if(!burst_ready_heap.empty()){
-			auto& readys = burst_ready_heap.top();
-			if (readys.has_request() &&
-				readys.next_request().tag.proportion < max_tag) {
-				return NextReq(HeapId::burst);
-			}
-		}
+	  if (readys.has_request() &&
+	      readys.next_request().tag.proportion < max_tag) {
+	    return NextReq(HeapId::ready);
+	  } else if (reserv.has_request() &&
+		     reserv.next_request().tag.reservation < max_tag) {
+	    return NextReq(HeapId::reservation);
+	  }
 	}
-
-
 
 	// nothing scheduled; make sure we re-run when next
 	// reservation item or next limited item comes up
 
 	Time next_call = TimeMax;
-
-//	//获取下一次延迟的时间
-//	if (!resv_heap.empty() && delay_heap.top().has_request()) {
-//	  next_call =
-//	    min_not_0_time(next_call,
-//			   delay_heap.top().next_request().tag.delay);
-//	}
-
-	if (!resv_heap.empty() && resv_heap.top().has_request()) {
+	if (resv_heap.top().has_request()) {
 	  next_call =
 	    min_not_0_time(next_call,
 			   resv_heap.top().next_request().tag.reservation);
 	}
-	if (!resv_heap.empty() && limit_heap.top().has_request()) {
+	if (limit_heap.top().has_request()) {
 	  const auto& next = limit_heap.top().next_request();
-	  assert(!next.tag.ready || max_tag == next.tag.proportion);
-	  next_call = min_not_0_time(next_call, next.tag.limit);
-	}
-	if (!burst_ready_heap.empty() && burst_limit_heap.top().has_request()) {
-	  const auto& next = burst_limit_heap.top().next_request();
 	  assert(!next.tag.ready || max_tag == next.tag.proportion);
 	  next_call = min_not_0_time(next_call, next.tag.limit);
 	}
@@ -1852,8 +1193,6 @@ namespace crimson {
 	  return NextReq::none();
 	}
       } // do_next_request
-
-
 
 
       // if possible is not zero and less than current then return it;
@@ -1913,22 +1252,6 @@ namespace crimson {
 	    }
 	  } // for
 
-
-	  //  清理突发堆中的客户端
-	  for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
-	    auto i2 = i++;
-	    if (erase_point &&
-	        erased_num < erase_max &&
-	        i2->second->last_tick <= erase_point) {
-	      delete_from_burst_heaps(i2->second);
-	      burst_client_map.erase(i2);
-	      erased_num++;
-	    } else if (idle_point && i2->second->last_tick <= idle_point) {
-	      i2->second->idle = true;
-	    }
-	  } // for
-
-
 	  auto wperiod = check_time;
 	  if (erased_num >= erase_max) {
 	    wperiod = duration_cast<milliseconds>(aggressive_check_time);
@@ -1939,57 +1262,6 @@ namespace crimson {
 	  cleaning_job->try_update(wperiod);
 	} // if
       } // do_clean
-
-
-
-      	// 拉回同一起跑线
-	void initialize_proportion(){
-	if (!burst_client_map.empty()) {
-		for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
-		  	auto i2 = i++;
-			(i2->second->prev_tag).proportion = 1;
-	 	 }
-	}
-	}
-
-
-      void do_period() {
-		// 更新周期号
-		epoch.update_epoch();
-
-	if (!burst_client_map.empty()) {
-
-	 for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
-
-		  auto i2 = i++;
-
-		// 重新初始化客户端周期信息
-  		if (auto cli_epoch = std::get_if<ClientEpoch>(&i2->second->client_date)) {
-
-  			cli_epoch->cum_duration = std::chrono::milliseconds(0);
-  			cli_epoch->is_cumulative = false;
-  			cli_epoch->is_limit = false;
-
-     	 	}
-
-		(i2->second->prev_tag).proportion = 1;
-
-        } // for
-}
-
-
-		//咯咯哒
-		std::ofstream log_file_period("/home/mxqh/software/ceph/a_do_period.txt", std::ios::app); // 打开日志文件进行追加
-        if (log_file_period.is_open()) {
-
-			log_file_period <<"do_period"<< std::endl;
-
-
-            log_file_period.close(); // 关闭日志文件
-        }
-
-      } // do_period
-
 
 
       // data_mtx must be held by caller
@@ -2009,13 +1281,6 @@ namespace crimson {
 #endif
 	delete_from_heap(client, limit_heap);
 	delete_from_heap(client, ready_heap);
-      }
-
-
-       //  在堆中删除某个突发客户端
-	void delete_from_burst_heaps(ClientRecRef& client) {
-		delete_from_heap(client, burst_limit_heap);
-		delete_from_heap(client, burst_ready_heap);
       }
     }; // class PriorityQueueBase
 
@@ -2088,28 +1353,24 @@ namespace crimson {
       int add_request(R&& request,
 		      const C& client_id,
 		      const ReqParams& req_params,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	return add_request(typename super::RequestRef(new R(std::move(request))),
 			   client_id,
 			   req_params,
 			   get_time(),
-			   cost,
-			   is_burst);
+			   cost);
       }
 
 
       int add_request(R&& request,
 		      const C& client_id,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	static const ReqParams null_req_params;
 	return add_request(typename super::RequestRef(new R(std::move(request))),
 			   client_id,
 			   null_req_params,
 			   get_time(),
-			   cost,
-			   is_burst);
+			   cost);
       }
 
 
@@ -2117,32 +1378,28 @@ namespace crimson {
 			   const C& client_id,
 			   const ReqParams& req_params,
 			   const Time time,
-			   const Cost cost = 1u,
-		      const bool is_burst = false) {
+			   const Cost cost = 1u) {
 	return add_request(typename super::RequestRef(new R(std::move(request))),
 			   client_id,
 			   req_params,
 			   time,
-			   cost,
-			   is_burst);
+			   cost);
       }
 
 
       int add_request(typename super::RequestRef&& request,
 		      const C& client_id,
 		      const ReqParams& req_params,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
-	return add_request(std::move(request), client_id, req_params, get_time(), cost, is_burst);
+		      const Cost cost = 1u) {
+	return add_request(std::move(request), client_id, req_params, get_time(), cost);
       }
 
 
       int add_request(typename super::RequestRef&& request,
 		      const C& client_id,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	static const ReqParams null_req_params;
-	return add_request(std::move(request), client_id, null_req_params, get_time(), cost, is_burst);
+	return add_request(std::move(request), client_id, null_req_params, get_time(), cost);
       }
 
 
@@ -2151,8 +1408,7 @@ namespace crimson {
 		      const C& client_id,
 		      const ReqParams& req_params,
 		      const Time time,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	typename super::DataGuard g(this->data_mtx);
 #ifdef PROFILE
 	add_request_timer.start();
@@ -2161,8 +1417,7 @@ namespace crimson {
 				      client_id,
 				      req_params,
 				      time,
-				      cost,
-				      is_burst);
+				      cost);
 	// no call to schedule_request for pull version
 #ifdef PROFILE
 	add_request_timer.stop();
@@ -2222,16 +1477,6 @@ namespace crimson {
 					       PhaseType::reservation));
 	  ++this->reserv_sched_count;
 	  break;
-
-
-	// 突发请求处理逻辑
-	case super::HeapId::burst:
-	  (void) super::pop_process_request(this->burst_ready_heap,
-				     process_f(result, PhaseType::burst));        
-	  ++this->burst_sched_count;
-	  break;
-
-
 	case super::HeapId::ready:
 	  {
 	    auto tag = super::pop_process_request(this->ready_heap,
@@ -2359,23 +1604,20 @@ namespace crimson {
       int add_request(R&& request,
 		      const C& client_id,
 		      const ReqParams& req_params,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	return add_request(typename super::RequestRef(new R(std::move(request))),
 			   client_id,
 			   req_params,
 			   get_time(),
-			   cost,
-			   is_burst);
+			   cost);
       }
 
 
       int add_request(typename super::RequestRef&& request,
 		      const C& client_id,
 		      const ReqParams& req_params,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
-	return add_request(std::move(request), client_id, req_params, get_time(), cost, is_burst);
+		      const Cost cost = 1u) {
+	return add_request(std::move(request), client_id, req_params, get_time(), cost);
       }
 
 
@@ -2383,14 +1625,12 @@ namespace crimson {
 			   const C& client_id,
 			   const ReqParams& req_params,
 			   const Time time,
-			   const Cost cost = 1u,
-		      const bool is_burst = false) {
+			   const Cost cost = 1u) {
 	return add_request(typename super::RequestRef(new R(request)),
 			   client_id,
 			   req_params,
 			   time,
-			   cost,
-			   is_burst);
+			   cost);
       }
 
 
@@ -2398,8 +1638,7 @@ namespace crimson {
 		      const C& client_id,
 		      const ReqParams& req_params,
 		      const Time time,
-		      const Cost cost = 1u,
-		      const bool is_burst = false) {
+		      const Cost cost = 1u) {
 	typename super::DataGuard g(this->data_mtx);
 #ifdef PROFILE
 	add_request_timer.start();
@@ -2408,8 +1647,7 @@ namespace crimson {
 				      client_id,
 				      req_params,
 				      time,
-				      cost,
-				      is_burst);
+				      cost);
         if (r == 0) {
 	  (void) schedule_request();
         }
@@ -2474,13 +1712,6 @@ namespace crimson {
 	  // tags here
 	  ++this->reserv_sched_count;
 	  break;
-
-	// 突发请求处理逻辑
-	case super::HeapId::burst:
-		(void) submit_top_request(this->burst_ready_heap, PhaseType::burst);
-	  	++this->burst_sched_count;
-	  	break;
-
 	case super::HeapId::ready:
 	  {
 	    auto req = submit_top_request(this->ready_heap, PhaseType::priority);
