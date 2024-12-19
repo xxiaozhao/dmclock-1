@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.5.1)
 
 project(dmclock CXX)
 
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/modules")
 
 if (NOT(BOOST_FOUND))

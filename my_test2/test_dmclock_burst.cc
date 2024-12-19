@@ -70,8 +70,12 @@ public:
         service_time(std::chrono::microseconds(1000000 / _iops_capacity)) {}
 
     void process_request(const TestRequest& req, std::function<void(TestResponse)> cb) {
-        std::this_thread::sleep_for(service_time);
-        cb(TestResponse(req));
+        try {
+            std::this_thread::sleep_for(service_time);
+            cb(TestResponse(req));
+        } catch (const std::exception& e) {
+            std::cerr << "处理请求时出错: " << e.what() << std::endl;
+        }
     }
 };
 
@@ -124,35 +128,46 @@ int main() {
         auto req = queue.pull_request();
         if (req.is_retn()) {
             auto& retn = req.get_retn();
-            server->process_request(
-                *retn.request,
-                [&](const TestResponse& resp) {
-                    // 计算请求处理时间
-                    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                        resp.end_time - resp.req.start_time).count();
-                    
-                    // 获取当前时间点
-                    auto current_time = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        current_time - start_time).count();
+            if (!retn.request) {
+                std::cerr << "Invalid request pointer" << std::endl;
+                continue;
+            }
+            
+            try {
+                server->process_request(
+                    *retn.request,
+                    [&](const TestResponse& resp) {
+                        // 计算请求处理时间
+                        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                            resp.end_time - resp.req.start_time).count();
+                        
+                        // 获取当前时间点
+                        auto current_time = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                            current_time - start_time).count();
 
-                    // 打印请求信息
-                    std::cout << "Time: " << elapsed << "s | "
-                             << "Client: " << (retn.client == 100 ? "BURST" : std::to_string(retn.client)) 
-                             << " | Request ID: " << resp.req.id
-                             << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
-                                               retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "UNKNOWN")
-                             << " | Processing Time: " << duration << "us"
-                             << std::endl;
+                        // 打印请求信息
+                        std::cout << "Time: " << elapsed << "s | "
+                                 << "Client: " << (retn.client == 100 ? "BURST" : std::to_string(retn.client)) 
+                                 << " | Request ID: " << resp.req.id
+                                 << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
+                                                   retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "UNKNOWN")
+                                 << " | Processing Time: " << duration << "us"
+                                 << std::endl;
 
-                    // 完成请求处理
-                    if (retn.client == 100) {
-                        burst_client->request_complete();
-                    } else {
-                        normal_clients[retn.client]->request_complete();
+                        // 完成请求处理
+                        if (retn.client == 100) {
+                            burst_client->request_complete();
+                        } else {
+                            normal_clients[retn.client]->request_complete();
+                        }
                     }
-                }
-            );
+                );
+            } catch (const std::exception& e) {
+                std::cerr << "Exception in process_request: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "Unknown exception in process_request" << std::endl;
+            }
         }
     }
 
