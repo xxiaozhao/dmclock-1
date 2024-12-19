@@ -1,0 +1,41 @@
+
+file_name:2:configs/dmc_sim_100_100.conf
+    average: 383.85 nanoseconds per request/response
+    average: 520.92 nanoseconds per request/response
+    average: 1562.92 nanoseconds per request/response
+    average: 554.18 nanoseconds per request/response
+file_name:2:configs/dmc_sim_100_100.conf
+    average: 505.61 nanoseconds per request/response
+    average: 975.03 nanoseconds per request/response
+    average: 1607.53 nanoseconds per request/response
+    average: 565.35 nanoseconds per request/response
+file_name:3:configs/dmc_sim_100_100.conf
+    average: 385.19 nanoseconds per request/response
+    average: 564.08 nanoseconds per request/response
+    average: 1532.32 nanoseconds per request/response
+    average: 533.74 nanoseconds per request/response
+file_name:3:configs/dmc_sim_100_100.conf
+    average: 387.31 nanoseconds per request/response
+    average: 407.15 nanoseconds per request/response
+    average: 1559.87 nanoseconds per request/response
+    average: 552.41 nanoseconds per request/response
+file_name:2:configs/dmc_sim_8_6.conf
+    average: 213.31 nanoseconds per request/response
+    average: 260.43 nanoseconds per request/response
+    average: 5310.00 nanoseconds per request/response
+    average: 273.25 nanoseconds per request/response
+file_name:2:configs/dmc_sim_8_6.conf
+    average: 228.56 nanoseconds per request/response
+    average: 288.83 nanoseconds per request/response
+    average: 5244.10 nanoseconds per request/response
+    average: 302.90 nanoseconds per request/response
+file_name:3:configs/dmc_sim_8_6.conf
+    average: 231.79 nanoseconds per request/response
+    average: 284.64 nanoseconds per request/response
+    average: 5226.63 nanoseconds per request/response
+    average: 298.37 nanoseconds per request/response
+file_name:3:configs/dmc_sim_8_6.conf
+    average: 220.52 nanoseconds per request/response
+    average: 278.02 nanoseconds per request/response
+    average: 4822.57 nanoseconds per request/response
+    average: 287.17 nanoseconds per request/response
