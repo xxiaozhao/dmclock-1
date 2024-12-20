@@ -1915,7 +1915,7 @@ namespace crimson {
 
 
 	  //  清理突发堆中的客户端
-	  for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
+	  for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
 	    auto i2 = i++;
 	    if (erase_point &&
 	        erased_num < erase_max &&
@@ -1945,7 +1945,7 @@ namespace crimson {
       	// 拉回同一起跑线
 	void initialize_proportion(){
 	if (!burst_client_map.empty()) {
-		for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
+		for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
 		  	auto i2 = i++;
 			(i2->second->prev_tag).proportion = 1;
 	 	 }
@@ -1959,7 +1959,7 @@ namespace crimson {
 
 	if (!burst_client_map.empty()) {
 
-	 for (auto i = burst_client_map.begin(); i != client_map.end(); /* empty */) {
+	 for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
 
 		  auto i2 = i++;
 

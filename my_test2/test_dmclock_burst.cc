@@ -2,6 +2,7 @@
 #include <chrono>
 #include <memory>
 #include <vector>
+#include <fstream>
 #include "dmclock_server.h"
 
 // 定义请求类型
@@ -74,7 +75,17 @@ public:
             std::this_thread::sleep_for(service_time);
             cb(TestResponse(req));
         } catch (const std::exception& e) {
-            std::cerr << "处理请求时出错: " << e.what() << std::endl;
+            std::ofstream log_file("error_log.txt", std::ios::app);
+            if (log_file.is_open()) {
+                log_file << "Exception caught: 处理休眠" << e.what() << std::endl;
+                log_file.close();
+            }
+        } catch (...) {
+            std::ofstream log_file("error_log.txt", std::ios::app);
+            if (log_file.is_open()) {
+                log_file << "Unknown exception caught:处理休眠" << std::endl;
+                log_file.close();
+            }
         }
     }
 };
@@ -107,7 +118,7 @@ int main() {
 
     // 模拟运行
     const auto start_time = std::chrono::steady_clock::now();
-    const auto run_duration = std::chrono::seconds(60);
+    const auto run_duration = std::chrono::seconds(600);
 
     while (std::chrono::steady_clock::now() - start_time < run_duration) {
         // 处理普通客户端请求
@@ -164,12 +175,22 @@ int main() {
                     }
                 );
             } catch (const std::exception& e) {
-                std::cerr << "Exception in process_request: " << e.what() << std::endl;
+                std::ofstream log_file("error_log.txt", std::ios::app);
+                if (log_file.is_open()) {
+                    log_file << "Exception caught:拉取请求 " << e.what() << std::endl;
+                    log_file.close();
+                }
             } catch (...) {
-                std::cerr << "Unknown exception in process_request" << std::endl;
+                std::ofstream log_file("error_log.txt", std::ios::app);
+                if (log_file.is_open()) {
+                    log_file << "Unknown exception caught:拉取请求" << std::endl;
+                    log_file.close();
+                }
             }
         }
     }
+
+    std::cout << "恭喜，程序运行完毕！" << std::endl;
 
     return 0;
 }  
