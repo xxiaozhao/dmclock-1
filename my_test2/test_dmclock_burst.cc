@@ -48,6 +48,7 @@ public:
     }
 
     TestRequest create_request() {
+        outstanding_ops++;
         return TestRequest(++ops_count, is_burst);
     }
 
@@ -57,6 +58,10 @@ public:
 
     bool is_burst_client() const {
         return is_burst;
+    }
+
+    uint64_t get_outstanding_ops() const {
+        return outstanding_ops;
     }
 };
 
@@ -101,11 +106,11 @@ int main() {
     }
 
     // 创建突发客户端
-    auto burst_client = std::make_shared<TestClient>(1000, 50, true);
+    auto burst_client = std::make_shared<TestClient>(1000, 500, true);
 
     // 创建dmclock队列
     crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 100.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 500.0, 500, 500);
+    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 1000.0, 50000, 500);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
         if (client_id == 100) { // burst client id
@@ -116,21 +121,27 @@ int main() {
 
     crimson::dmclock::PullPriorityQueue<int, TestRequest> queue(client_info_f);
 
+    // 计数器
+    int reservation_count = 0;
+    int burst_count = 0;
+    int priority_count = 0;
+
     // 模拟运行
     const auto start_time = std::chrono::steady_clock::now();
-    const auto run_duration = std::chrono::seconds(600);
+    const auto run_duration = std::chrono::seconds(60);
 
     while (std::chrono::steady_clock::now() - start_time < run_duration) {
         // 处理普通客户端请求
         for (int i = 0; i < normal_clients.size(); ++i) {
-            if (normal_clients[i]->can_send_request()) {
+            while (normal_clients[i]->can_send_request()) {
                 auto req = normal_clients[i]->create_request();
                 queue.add_request(std::move(req), i, crimson::dmclock::ReqParams(1.0, 1.0));
+                // std::cout <<"客户端" << i << " outstanding_ops: " << normal_clients[i]->get_outstanding_ops() << std::endl;
             }
         }
 
         // 处理突发客户端请求
-        if (burst_client->can_send_request()) {
+        while (burst_client->can_send_request()) {
             auto req = burst_client->create_request();
             queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(1.0, 1.0), 1, true);
         }
@@ -144,6 +155,15 @@ int main() {
                 continue;
             }
             
+            // 根据阶段更新计数器
+            if (retn.phase == crimson::dmclock::PhaseType::reservation) {
+                ++reservation_count;
+            } else if (retn.phase == crimson::dmclock::PhaseType::burst) {
+                ++burst_count;
+            } else if (retn.phase == crimson::dmclock::PhaseType::priority) {
+                ++priority_count;
+            }
+
             try {
                 server->process_request(
                     *retn.request,
@@ -165,6 +185,11 @@ int main() {
                                                    retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "UNKNOWN")
                                  << " | Processing Time: " << duration << "us"
                                  << std::endl;
+
+                        // if(retn.phase == crimson::dmclock::PhaseType::burst)
+                        //         std::cout << "Time: " << elapsed 
+                        //         << " | Request ID: " << resp.req.id
+                        //         << " | Phase: Burst" << std::endl;
 
                         // 完成请求处理
                         if (retn.client == 100) {
@@ -189,6 +214,14 @@ int main() {
             }
         }
     }
+
+    // 打印统计信息
+    std::cout << "\n=== Final Statistics ===\n"
+              << "Reservation Phase Requests: " << reservation_count << "\n"
+              << "Burst Phase Requests: " << burst_count << "\n"
+              << "Priority Phase Requests: " << priority_count << "\n"
+              << "Total Requests: " << (reservation_count + burst_count + priority_count) << "\n"
+              << "=====================\n" << std::endl;
 
     std::cout << "恭喜，程序运行完毕！" << std::endl;
 

@@ -1755,7 +1755,7 @@ namespace crimson {
 			readys.next_request().tag.ready &&
 			readys.next_request().tag.proportion < max_tag) {
 
-			std::get<ClientEpoch>(limits->client_date).is_fulfill(current_burst_client_count);
+			std::get<ClientEpoch>(limits->client_date).is_fulfill(0);
 
 
 		return NextReq(HeapId::burst);
@@ -1979,7 +1979,7 @@ namespace crimson {
 
 
 		//咯咯哒
-		std::ofstream log_file_period("/home/mxqh/software/ceph/a_do_period.txt", std::ios::app); // 打开日志文件进行追加
+		std::ofstream log_file_period("a_do_period.txt", std::ios::app); // 打开日志文件进行追加
         if (log_file_period.is_open()) {
 
 			log_file_period <<"do_period"<< std::endl;
