@@ -97,20 +97,34 @@ public:
 
 int main() {
     // 创建服务器
-    auto server = std::make_shared<TestServer>(1000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(5000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
     for (int i = 0; i < 100; ++i) {
-        normal_clients.push_back(std::make_shared<TestClient>(100, 10));
+        normal_clients.push_back(std::make_shared<TestClient>(100, 100));
     }
 
     // 创建突发客户端
     auto burst_client = std::make_shared<TestClient>(1000, 500, true);
 
+
+
+
+
+
+
+
     // 创建dmclock队列
     crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 100.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 1000.0, 50000, 500);
+    crimson::dmclock::ClientInfo burst_info(0.0, 1.0,1000.0, 100, 1000);
+
+
+
+
+
+
+
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
         if (client_id == 100) { // burst client id
@@ -119,7 +133,7 @@ int main() {
         return &normal_info;
     };
 
-    crimson::dmclock::PullPriorityQueue<int, TestRequest> queue(client_info_f);
+    crimson::dmclock::PullPriorityQueue<int, TestRequest, true, true, 2> queue(client_info_f);
 
     // 计数器
     int reservation_count = 0;
@@ -128,23 +142,40 @@ int main() {
 
     // 模拟运行
     const auto start_time = std::chrono::steady_clock::now();
-    const auto run_duration = std::chrono::seconds(60);
+    const auto run_duration = std::chrono::seconds(20);
 
     while (std::chrono::steady_clock::now() - start_time < run_duration) {
         // 处理普通客户端请求
         for (int i = 0; i < normal_clients.size(); ++i) {
             while (normal_clients[i]->can_send_request()) {
                 auto req = normal_clients[i]->create_request();
-                queue.add_request(std::move(req), i, crimson::dmclock::ReqParams(1.0, 1.0));
-                // std::cout <<"客户端" << i << " outstanding_ops: " << normal_clients[i]->get_outstanding_ops() << std::endl;
+                queue.add_request(std::move(req), i, crimson::dmclock::ReqParams(0, 0));
             }
         }
 
-        // 处理突发客户端请求
+        // // 处理突发客户端请求
+        // static auto last_add_time = std::chrono::steady_clock::now();
+        // auto current_time = std::chrono::steady_clock::now();
+        // auto time_since_last_add = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_add_time).count();
+
+        // if (time_since_last_add >= 100) { // 时间间隔调整为0.1秒
+        //     int requests_to_add = 500; // 每0.1秒添加500个请求
+        //     while (requests_to_add > 0 && burst_client->can_send_request()) {
+        //         auto req = burst_client->create_request();
+        //         queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(0, 0), 1, true);
+        //         --requests_to_add;
+        //     }
+        //     last_add_time = current_time;
+        // }
+
+
         while (burst_client->can_send_request()) {
             auto req = burst_client->create_request();
-            queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(1.0, 1.0), 1, true);
+            queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(0, 0), 1, true);
         }
+
+
+
 
         // 处理请求
         auto req = queue.pull_request();
@@ -177,19 +208,20 @@ int main() {
                         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                             current_time - start_time).count();
 
-                        // 打印请求信息
-                        std::cout << "Time: " << elapsed << "s | "
-                                 << "Client: " << (retn.client == 100 ? "BURST" : std::to_string(retn.client)) 
-                                 << " | Request ID: " << resp.req.id
-                                 << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
-                                                   retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "UNKNOWN")
-                                 << " | Processing Time: " << duration << "us"
-                                 << std::endl;
+                        // // 打印请求信息
+                        // std::cout << "Time: " << elapsed << "s | "
+                        //          << "Client: " << (retn.client == 100 ? "BURST" : std::to_string(retn.client)) 
+                        //          << " | Request ID: " << resp.req.id
+                        //          << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
+                        //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "UNKNOWN")
+                        //          << " | Processing Time: " << duration << "us"
+                        //          << std::endl;
 
-                        // if(retn.phase == crimson::dmclock::PhaseType::burst)
-                        //         std::cout << "Time: " << elapsed 
-                        //         << " | Request ID: " << resp.req.id
-                        //         << " | Phase: Burst" << std::endl;
+                        //  打印突发请求处理情况
+                        if(retn.phase == crimson::dmclock::PhaseType::burst)
+                                std::cout << "Time: " << elapsed 
+                                << " | Request ID: " << resp.req.id
+                                << " | Phase: Burst" << std::endl;
 
                         // 完成请求处理
                         if (retn.client == 100) {

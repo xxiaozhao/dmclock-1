@@ -192,7 +192,7 @@ namespace crimson {
        limit = _limit;
 	   total_bandwidth = _total_bandwidth;
 	   b0 = _b0;
-	   duration = std::chrono::milliseconds(_total_bandwidth/_b0);
+	   duration = std::chrono::milliseconds((_total_bandwidth*1000)/_b0);		//*1000是因为要转换为毫秒
        reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
        weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
        limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
@@ -527,11 +527,12 @@ namespace crimson {
 				is_cumulative = true;
 				processed_requests = 0;
 				burst_client_count = current_burst_client_count;
+				std::cout<<"开始计时！"<< std::endl;
 
 			}
 
 			//是否达到限制时间要求
-			bool is_fulfill(size_t current_burst_client_count){
+			int epoch_state(size_t current_burst_client_count){
 
 				//处理请求数+1
 				processed_requests++;
@@ -539,11 +540,13 @@ namespace crimson {
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
 					end();
-					return true;
+					std::cout<<"时间片耗尽！"<< std::endl;
+					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
 					start(current_burst_client_count);
+					return 1;		// 刚启动
 				}
-					return false;
+					return 2;		//中间请求
 			}
 
 			// 结束计时
@@ -557,7 +560,11 @@ namespace crimson {
 
 
 		// 数据类型 ClientData，存储 `ClientEpoch` 或者 `ClientType`
-	using ClientData = std::variant<ClientEpoch, ClientType>;
+	#ifdef __cpp_lib_variant
+		using ClientData = std::variant<ClientEpoch, ClientType>;
+	#else
+		using ClientData = boost::variant<ClientEpoch, ClientType>;
+	#endif
 
 
 
@@ -1572,6 +1579,7 @@ namespace crimson {
 			if(!top.has_request())
 			{
 				std::get<ClientEpoch>(top.client_date).end();
+				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
 			burst_ready_heap.demote(top);
@@ -1755,7 +1763,12 @@ namespace crimson {
 			readys.next_request().tag.ready &&
 			readys.next_request().tag.proportion < max_tag) {
 
-			std::get<ClientEpoch>(limits->client_date).is_fulfill(0);
+
+			auto state = std::get<ClientEpoch>(limits->client_date).epoch_state(current_burst_client_count);
+			if(state == 1)
+			{
+				readys.next_request().tag.limit = get_time();
+			}
 
 
 		return NextReq(HeapId::burst);
