@@ -522,24 +522,27 @@ namespace crimson {
 
 
 			// 开始计时
-			void start(size_t current_burst_client_count){
+			void start(size_t& current_burst_client_count){
 				begin_time = Clock::now();
 				is_cumulative = true;
 				processed_requests = 0;
+				current_burst_client_count++;
 				burst_client_count = current_burst_client_count;
 				std::cout<<"开始计时！"<< std::endl;
+				std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 
 			}
 
 			//是否达到限制时间要求
-			int epoch_state(size_t current_burst_client_count){
+			int epoch_state(size_t& current_burst_client_count){
 
 				//处理请求数+1
 				processed_requests++;
 
+				
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
-					end();
+					end(current_burst_client_count);
 					std::cout<<"时间片耗尽！"<< std::endl;
 					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
@@ -550,12 +553,21 @@ namespace crimson {
 			}
 
 			// 结束计时
-			void end(){
+			void end(size_t& current_burst_client_count){
+				// std::cout << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration).count() << " 毫秒" << std::endl;
 				cum_duration += std::chrono::duration_cast<Duration>(Clock::now() - begin_time);
+				begin_time = Clock::now();
 				is_cumulative = false;
-				if (cum_duration > duration)
+				if (cum_duration >= duration)
 					is_limit = true;
+
+				std::cout << "累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
+
 			}
+				
+
+
+
 		}; // class ClientEpoch
 
 
@@ -1578,7 +1590,7 @@ namespace crimson {
 			// 如果该突发客户端没有后续请求，则暂停计数
 			if(!top.has_request())
 			{
-				std::get<ClientEpoch>(top.client_date).end();
+				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count);
 				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
@@ -1768,6 +1780,30 @@ namespace crimson {
 			if(state == 1)
 			{
 				readys.next_request().tag.limit = get_time();
+				std::cout << "初始化限制标签"  << std::endl;
+			}
+
+
+
+						// 动态生成日志文件名
+            std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
+
+            // 打开对应的日志文件
+            std::ofstream log_file(log_filename, std::ios::app);
+            if (log_file.is_open()) {
+
+            // 记录即将出队的请求的客户端ID
+			log_file << "周期: " << epoch.num << " " 
+            << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
+			<< "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
+			<< "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
+			<< "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
+			
+
+            // 关闭日志文件
+            log_file.close();
+			
+
 			}
 
 
@@ -1972,7 +2008,16 @@ namespace crimson {
 
 	if (!burst_client_map.empty()) {
 
+
+	BurstDataGuard b(burst_data_mtx);
+	int k = 0;
+	
+
 	 for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
+
+		std::cout<<  std::endl;
+		std::cout<<"突发客户端编号："<< k++ <<  std::endl;
+
 
 		  auto i2 = i++;
 
@@ -1980,15 +2025,24 @@ namespace crimson {
   		if (auto cli_epoch = std::get_if<ClientEpoch>(&i2->second->client_date)) {
 
   			cli_epoch->cum_duration = std::chrono::milliseconds(0);
-  			cli_epoch->is_cumulative = false;
+			cli_epoch->begin_time = Clock::now();
+
+			if(cli_epoch->is_cumulative == true){
+
+				cli_epoch->is_cumulative = false;
+				current_burst_client_count--;
+				std::cout<<"周期结束！"<< std::endl;
+				std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
+			}
+
   			cli_epoch->is_limit = false;
 
      	 	}
 
-		(i2->second->prev_tag).proportion = 1;
+		// (i2->second->prev_tag).proportion = 1;
 
         } // for
-}
+		}
 
 
 		//咯咯哒
@@ -2192,6 +2246,7 @@ namespace crimson {
       PullReq pull_request(const Time now) {
 	PullReq result;
 	typename super::DataGuard g(this->data_mtx);
+	typename super::BurstDataGuard b(this->burst_data_mtx);
 #ifdef PROFILE
 	pull_request_timer.start();
 #endif
