@@ -558,6 +558,7 @@ namespace crimson {
 				cum_duration += std::chrono::duration_cast<Duration>(Clock::now() - begin_time);
 				begin_time = Clock::now();
 				is_cumulative = false;
+				current_burst_client_count--;
 				if (cum_duration >= duration)
 					is_limit = true;
 

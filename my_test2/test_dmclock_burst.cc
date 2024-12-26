@@ -111,7 +111,7 @@ int main() {
 
     // 解析命令行参数
     int num_normal_clients = 1;
-    int num_burst_clients = 1;
+    int num_burst_clients = 6;
 
     // 创建服务器
     auto server = std::make_shared<TestServer>(10000); // 1000 IOPS capacity
