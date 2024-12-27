@@ -110,11 +110,11 @@ public:
 int main() {
 
     // 解析命令行参数
-    int num_normal_clients = 1;
+    int num_normal_clients = 0;
     int num_burst_clients = 10;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(1000000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(10000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;

@@ -1798,7 +1798,7 @@ namespace crimson {
 			auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
 			if(state == 1)
 			{
-				readys.next_request().tag.limit = get_time();
+				readys.next_request().tag.limit = get_time()+readys.info->limit_inv;
 				// std::cout << "初始化限制标签"  << std::endl;
 			}
 
