@@ -111,10 +111,10 @@ int main() {
 
     // 解析命令行参数
     int num_normal_clients = 1;
-    int num_burst_clients = 6;
+    int num_burst_clients = 10;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(10000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(1000000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -130,7 +130,7 @@ int main() {
 
     // 创建dmclock队列
     crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 100.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 50.0, 10, 50);
+    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 100.0, 10, 100);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
         if (client_id >= num_normal_clients) { // burst client id
@@ -214,15 +214,15 @@ int main() {
                         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                             current_time - start_time).count();
 
-                        // // 打印突发请求处理情况
-                        // if(retn.phase == crimson::dmclock::PhaseType::burst)
-                        //         std::cout << "Time: " << elapsed << "s | "
-                        //          << "Client: " << (std::to_string(retn.client)) 
-                        //          << " | Request ID: " << resp.req.id
-                        //          << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
-                        //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
-                        //          << " | Processing Time: " << duration << "us"
-                        //          << std::endl;
+                        // 打印突发请求处理情况
+                        if(retn.phase == crimson::dmclock::PhaseType::burst)
+                                std::cout << "Time: " << elapsed << "s | "
+                                 << "Client: " << (std::to_string(retn.client)) 
+                                 << " | Request ID: " << resp.req.id
+                                 << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
+                                                   retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
+                                 << " | Processing Time: " << duration << "us"
+                                 << std::endl;
 
                         // 完成请求处理
                         if (retn.client >= num_normal_clients) {

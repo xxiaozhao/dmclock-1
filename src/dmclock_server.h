@@ -522,19 +522,19 @@ namespace crimson {
 
 
 			// 开始计时
-			void start(size_t& current_burst_client_count){
+			void start(size_t& current_burst_client_count, int id){
 				begin_time = Clock::now();
 				is_cumulative = true;
 				processed_requests = 0;
 				current_burst_client_count++;
 				burst_client_count = current_burst_client_count;
-				std::cout<<"开始计时！"<< std::endl;
-				std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
+				std::cout<<id<<"开始计时！"<< std::endl;
+				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 
 			}
 
 			//是否达到限制时间要求
-			int epoch_state(size_t& current_burst_client_count){
+			int epoch_state(size_t& current_burst_client_count, int id){
 
 				//处理请求数+1
 				processed_requests++;
@@ -542,18 +542,18 @@ namespace crimson {
 				
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
-					end(current_burst_client_count);
-					std::cout<<"时间片耗尽！"<< std::endl;
+					end(current_burst_client_count, id);
+					std::cout<<id<<"时间片耗尽！"<< std::endl;
 					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
-					start(current_burst_client_count);
+					start(current_burst_client_count,id);
 					return 1;		// 刚启动
-				}
+				}				
 					return 2;		//中间请求
 			}
 
 			// 结束计时
-			void end(size_t& current_burst_client_count){
+			void end(size_t& current_burst_client_count , int id){
 				// std::cout << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration).count() << " 毫秒" << std::endl;
 				cum_duration += std::chrono::duration_cast<Duration>(Clock::now() - begin_time);
 				begin_time = Clock::now();
@@ -562,7 +562,25 @@ namespace crimson {
 				if (cum_duration >= duration)
 					is_limit = true;
 
-				std::cout << "累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
+				// std::cout << "累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
+
+
+
+			//  std::string log_filename = "a_"+std::to_string(id) + ".txt";
+
+            // // 打开对应的日志文件
+            // std::ofstream log_file(log_filename, std::ios::app);
+            // if (log_file.is_open()) {
+
+            // // 记录即将出队的请求的客户端ID
+			// log_file<< "is_cumulative:"<< is_cumulative <<"   累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
+           
+
+            // // 关闭日志文件
+            // log_file.close();
+			
+
+			// }
 
 			}
 				
@@ -1591,7 +1609,7 @@ namespace crimson {
 			// 如果该突发客户端没有后续请求，则暂停计数
 			if(!top.has_request())
 			{
-				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count);
+				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
 				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
@@ -1777,11 +1795,11 @@ namespace crimson {
 			readys.next_request().tag.proportion < max_tag) {
 
 
-			auto state = std::get<ClientEpoch>(limits->client_date).epoch_state(current_burst_client_count);
+			auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
 			if(state == 1)
 			{
 				readys.next_request().tag.limit = get_time();
-				std::cout << "初始化限制标签"  << std::endl;
+				// std::cout << "初始化限制标签"  << std::endl;
 			}
 
 
@@ -2016,10 +2034,10 @@ namespace crimson {
 
 	 for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
 
-		std::cout<<  std::endl;
-		std::cout<<"突发客户端编号："<< k++ <<  std::endl;
+		// std::cout<<  std::endl;
+		// std::cout<<"突发客户端编号："<< k++ <<  std::endl;
 
-
+		  k++;
 		  auto i2 = i++;
 
 		// 重新初始化客户端周期信息
@@ -2032,8 +2050,8 @@ namespace crimson {
 
 				cli_epoch->is_cumulative = false;
 				current_burst_client_count--;
-				std::cout<<"周期结束！"<< std::endl;
-				std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
+				std::cout<<k-1<<"突发客户端周期结束！"<< std::endl;
+				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 			}
 
   			cli_epoch->is_limit = false;
