@@ -74,21 +74,11 @@ class TestServer {
 public:
     TestServer(uint64_t _iops_capacity) :
         iops_capacity(_iops_capacity),
-        service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity)-2:0)) {
-            std::cout << "service_time: " << service_time.count() << "us" << std::endl;
-        }
+        service_time(std::chrono::microseconds(1000000 / _iops_capacity)) {}
 
     void process_request(const TestRequest& req, std::function<void(TestResponse)> cb) {
         try {
-
-            auto start = std::chrono::high_resolution_clock::now();
-            auto end = start + service_time;
-
-            while (std::chrono::high_resolution_clock::now() < end) {
-                // 使用pause指令来减少功耗（仅在x86架构上有效）
-                asm volatile("pause" ::: "memory");
-            }
-
+            std::this_thread::sleep_for(service_time);
             cb(TestResponse(req));
         } catch (const std::exception& e) {
             std::ofstream log_file("error_log.txt", std::ios::app);
@@ -120,11 +110,11 @@ public:
 int main() {
 
     // 解析命令行参数
-    int num_normal_clients = 0;
-    int num_burst_clients = 50;
+    int num_normal_clients = 10000;
+    int num_burst_clients = 0;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(50000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(10000000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -139,13 +129,10 @@ int main() {
     }
 
     // 创建dmclock队列
-    crimson::dmclock::ClientInfo normal_info(0.0, 1.0, 100.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 1000.0, 100, 1000);
+    crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 100.0);
+    // crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 100.0, 10, 100);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
-        if (client_id >= num_normal_clients) { // burst client id
-            return &burst_info;
-        }
         return &normal_info;
     };
 
@@ -156,45 +143,18 @@ int main() {
     int burst_count = 0;
     int priority_count = 0;
 
-
-
-
-            // 处理普通客户端请求
-        for (int i = 0; i < normal_clients.size(); ++i) {
-            while (normal_clients[i]->can_send_request()) {
-                auto req = normal_clients[i]->create_request();
-                queue.add_request(std::move(req), i, crimson::dmclock::ReqParams(0, 0));
-            }
-        }
-
-        // // 处理突发客户端请求
-        // static auto last_add_time = std::chrono::steady_clock::now();
-        // auto current_time = std::chrono::steady_clock::now();
-        // auto time_since_last_add = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_add_time).count();
-
-        // if (time_since_last_add >= 100) { // 时间间隔调整为0.1秒
-        //     int requests_to_add = 500; // 每0.1秒添加500个请求
-        //     while (requests_to_add > 0 && burst_client->can_send_request()) {
-        //         auto req = burst_client->create_request();
-        //         queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(0, 0), 1, true);
-        //         --requests_to_add;
-        //     }
-        //     last_add_time = current_time;
-        // }
-
-
-        // 处理突发客户端请求
-        for (int i = 0; i < burst_clients.size(); ++i) {
-            while (burst_clients[i]->can_send_request()) {
-                auto req = burst_clients[i]->create_request();
-                queue.add_request(std::move(req), num_normal_clients + i, crimson::dmclock::ReqParams(0, 0), 1, true);
-            }
-        }
-
     // 模拟运行
     const auto start_time = std::chrono::steady_clock::now();
     const auto run_duration = std::chrono::seconds(10);
-    
+
+    // 添加普通客户端请求
+    for (int i = 0; i < normal_clients.size(); ++i) {
+        while (normal_clients[i]->can_send_request()) {
+            auto req = normal_clients[i]->create_request();
+            queue.add_request(std::move(req), i, crimson::dmclock::ReqParams(0, 0));
+        }
+    }
+
 
     while (std::chrono::steady_clock::now() - start_time < run_duration) {
 
@@ -203,7 +163,7 @@ int main() {
         if (req.is_retn()) {
             auto& retn = req.get_retn();
             if (!retn.request) {
-                std::cout << "Invalid request pointer***********************************************" << std::endl;
+                std::cerr << "Invalid request pointer" << std::endl;
                 continue;
             }
             
@@ -230,7 +190,6 @@ int main() {
                             current_time - start_time).count();
 
                         // // 打印突发请求处理情况
-                        // if(retn.phase == crimson::dmclock::PhaseType::burst)
                         //         std::cout << "Time: " << elapsed << "s | "
                         //          << "Client: " << (std::to_string(retn.client)) 
                         //          << " | Request ID: " << resp.req.id
@@ -239,25 +198,14 @@ int main() {
                         //          << " | Processing Time: " << duration << "us"
                         //          << std::endl;
 
-                        // // 记录开始时间
-                        // auto func_start_time = std::chrono::steady_clock::now();
-
                         // 完成请求处理
                         if (retn.client >= num_normal_clients) {
                             burst_clients[retn.client - num_normal_clients]->request_complete();
-                            auto req = burst_clients[retn.client - num_normal_clients]->create_request();
-                            queue.add_request(std::move(req), retn.client, crimson::dmclock::ReqParams(0, 0), 1, true);
-
                         } else {
                             normal_clients[retn.client]->request_complete();
                             auto req = normal_clients[retn.client]->create_request();
                             queue.add_request(std::move(req), retn.client, crimson::dmclock::ReqParams(0, 0));
                         }
-
-                        // // 记录结束时间
-                        // auto func_end_time = std::chrono::steady_clock::now();
-                        // auto func_duration = std::chrono::duration_cast<std::chrono::microseconds>(func_end_time - func_start_time).count();
-                        // std::cout << "Function execution time: " << func_duration << "us" << std::endl;
                     }
                 );
             } catch (const std::exception& e) {

@@ -528,7 +528,7 @@ namespace crimson {
 				processed_requests = 0;
 				current_burst_client_count++;
 				burst_client_count = current_burst_client_count;
-				std::cout<<id<<"开始计时！"<< std::endl;
+				// std::cout<<id<<"开始计时！"<< std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 
 			}
@@ -543,7 +543,7 @@ namespace crimson {
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
 					end(current_burst_client_count, id);
-					std::cout<<id<<"时间片耗尽！"<< std::endl;
+					// std::cout<<id<<"时间片耗尽！"<< std::endl;
 					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
 					start(current_burst_client_count,id);
@@ -1804,26 +1804,24 @@ namespace crimson {
 
 
 
-						// 动态生成日志文件名
-            std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
+			// 			// 动态生成日志文件名
+            // std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
 
-            // 打开对应的日志文件
-            std::ofstream log_file(log_filename, std::ios::app);
-            if (log_file.is_open()) {
+            // // 打开对应的日志文件
+            // std::ofstream log_file(log_filename, std::ios::app);
+            // if (log_file.is_open()) {
 
-            // 记录即将出队的请求的客户端ID
-			log_file << "周期: " << epoch.num << " " 
-            << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
-			<< "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
-			<< "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
-			<< "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
+            // // 记录即将出队的请求的客户端ID
+			// log_file << "周期: " << epoch.num << " " 
+            // << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
+			// << "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
+			// << "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
+			// << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
 			
 
-            // 关闭日志文件
-            log_file.close();
-			
-
-			}
+            // // 关闭日志文件
+            // log_file.close();
+			// }
 
 
 		return NextReq(HeapId::burst);
@@ -2050,7 +2048,7 @@ namespace crimson {
 
 				cli_epoch->is_cumulative = false;
 				current_burst_client_count--;
-				std::cout<<k-1<<"突发客户端周期结束！"<< std::endl;
+				// std::cout<<k-1<<"突发客户端周期结束！"<< std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 			}
 
@@ -2064,15 +2062,15 @@ namespace crimson {
 		}
 
 
-		//咯咯哒
-		std::ofstream log_file_period("a_do_period.txt", std::ios::app); // 打开日志文件进行追加
-        if (log_file_period.is_open()) {
+		// //咯咯哒
+		// std::ofstream log_file_period("a_do_period.txt", std::ios::app); // 打开日志文件进行追加
+        // if (log_file_period.is_open()) {
 
-			log_file_period <<"do_period"<< std::endl;
+		// 	log_file_period <<"do_period"<< std::endl;
 
 
-            log_file_period.close(); // 关闭日志文件
-        }
+        //     log_file_period.close(); // 关闭日志文件
+        // }
 
       } // do_period
 
@@ -2258,7 +2256,18 @@ namespace crimson {
 
 
       inline PullReq pull_request() {
-	return pull_request(get_time());
+		// auto start_time = std::chrono::steady_clock::now();
+		// auto req = pull_request(get_time());
+		// auto end_time = std::chrono::steady_clock::now();
+		// auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+		// if(req.is_retn()){
+		// 	std::cout << "pull_request time: " << duration.count() << "us" << std::endl;
+		// }
+
+
+		// return req;
+
+		return pull_request(get_time());
       }
 
 
