@@ -121,10 +121,10 @@ int main() {
 
     // 解析命令行参数
     int num_normal_clients = 0;
-    int num_burst_clients = 50;
+    int num_burst_clients = 500;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(50000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(500000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -167,20 +167,6 @@ int main() {
             }
         }
 
-        // // 处理突发客户端请求
-        // static auto last_add_time = std::chrono::steady_clock::now();
-        // auto current_time = std::chrono::steady_clock::now();
-        // auto time_since_last_add = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_add_time).count();
-
-        // if (time_since_last_add >= 100) { // 时间间隔调整为0.1秒
-        //     int requests_to_add = 500; // 每0.1秒添加500个请求
-        //     while (requests_to_add > 0 && burst_client->can_send_request()) {
-        //         auto req = burst_client->create_request();
-        //         queue.add_request(std::move(req), 100, crimson::dmclock::ReqParams(0, 0), 1, true);
-        //         --requests_to_add;
-        //     }
-        //     last_add_time = current_time;
-        // }
 
 
         // 处理突发客户端请求
@@ -197,6 +183,30 @@ int main() {
     
 
     while (std::chrono::steady_clock::now() - start_time < run_duration) {
+
+
+        // // 处理突发客户端请求
+        // static auto last_add_time = std::chrono::steady_clock::now();
+        // auto current_time = std::chrono::steady_clock::now();
+        // auto time_since_last_add = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_add_time).count();
+
+        // if (time_since_last_add >= 500) { // 时间间隔调整为0.1秒
+        //     for (int i = 0; i < burst_clients.size(); ++i) {
+        //         int requests_to_add = 100; // 每0.1秒添加500个请求
+        //         while (requests_to_add > 0 && burst_clients[i]->can_send_request()) {
+        //             auto req = burst_clients[i]->create_request();
+        //             queue.add_request(std::move(req), num_normal_clients + i, crimson::dmclock::ReqParams(0, 0), 1, true);
+        //             requests_to_add--;
+        //         }
+        //     }
+
+
+        //     last_add_time = current_time;
+        // }
+
+
+
+
 
         // 处理请求
         auto req = queue.pull_request();
@@ -238,6 +248,7 @@ int main() {
                         //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
                         //          << " | Processing Time: " << duration << "us"
                         //          << std::endl;
+
 
                         // // 记录开始时间
                         // auto func_start_time = std::chrono::steady_clock::now();

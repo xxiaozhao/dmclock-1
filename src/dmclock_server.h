@@ -533,13 +533,39 @@ namespace crimson {
 
 			}
 
+
+			void restart(){
+				int time_interval = 10;
+
+				Duration interval = std::chrono::milliseconds(time_interval);
+
+				// 当前时间
+				TimePoint current_time = Clock::now();
+
+				// 当前时间与开始时间的时间差
+				Duration time_diff = std::chrono::duration_cast<Duration>(current_time - begin_time);
+
+				// 如果time_diff大于等于时间间隔，则重启
+				if (time_diff >= interval) {
+					double time_rate = static_cast<double>(processed_requests) / (static_cast<double>(b0) * time_interval / 1000.0);
+					std::cout<<"time_rate:"<<time_rate<<"b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
+					cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * (time_rate>1?1:time_rate)));
+					begin_time = Clock::now();
+					processed_requests = 0;
+				}
+			}
+
+
+
+
 			//是否达到限制时间要求
 			int epoch_state(size_t& current_burst_client_count, int id){
 
 				//处理请求数+1
 				processed_requests++;
 
-				
+				restart();
+			
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
 					end(current_burst_client_count, id);
@@ -564,23 +590,6 @@ namespace crimson {
 
 				// std::cout << "累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
 
-
-
-			//  std::string log_filename = "a_"+std::to_string(id) + ".txt";
-
-            // // 打开对应的日志文件
-            // std::ofstream log_file(log_filename, std::ios::app);
-            // if (log_file.is_open()) {
-
-            // // 记录即将出队的请求的客户端ID
-			// log_file<< "is_cumulative:"<< is_cumulative <<"   累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
-           
-
-            // // 关闭日志文件
-            // log_file.close();
-			
-
-			// }
 
 			}
 				
@@ -2021,6 +2030,7 @@ namespace crimson {
 
       void do_period() {
 		// 更新周期号
+		std::cout<<"do_period"<<std::endl;
 		epoch.update_epoch();
 
 	if (!burst_client_map.empty()) {
@@ -2041,17 +2051,18 @@ namespace crimson {
 		// 重新初始化客户端周期信息
   		if (auto cli_epoch = std::get_if<ClientEpoch>(&i2->second->client_date)) {
 
-  			cli_epoch->cum_duration = std::chrono::milliseconds(0);
-			cli_epoch->begin_time = Clock::now();
+  			
 
 			if(cli_epoch->is_cumulative == true){
 
 				cli_epoch->is_cumulative = false;
 				current_burst_client_count--;
-				// std::cout<<k-1<<"突发客户端周期结束！"<< std::endl;
+				std::cout<<k-1<<"突发客户端周期结束！"<< "cum_duration" << (cli_epoch->cum_duration).count() << "累积时长" << (std::chrono::duration_cast<Duration>(Clock::now() - cli_epoch->begin_time) + cli_epoch->cum_duration).count() <<std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 			}
 
+			cli_epoch->cum_duration = std::chrono::milliseconds(0);
+			cli_epoch->begin_time = Clock::now();
   			cli_epoch->is_limit = false;
 
      	 	}
