@@ -36,6 +36,7 @@ class TestClient {
     uint64_t max_outstanding_ops;
     uint64_t iops_goal;
     bool is_burst;
+    
 
 public:
     TestClient(uint64_t _iops_goal, uint64_t _max_outstanding_ops, bool _is_burst = false) :
