@@ -1427,16 +1427,20 @@ namespace crimson {
 
 
       inline PullReq pull_request() {
-			auto start_time = std::chrono::steady_clock::now();
-			auto req = pull_request(get_time());
-			auto end_time = std::chrono::steady_clock::now();
-			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-			if(req.is_retn()){
-				std::cout << "pull_request time: " << duration.count() << "us" << std::endl;
-			}
+			// auto start_time = std::chrono::steady_clock::now();
+			// auto req = pull_request(get_time());
+			// auto end_time = std::chrono::steady_clock::now();
+			// auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+			// if(req.is_retn()){
+			// 	std::cout << "pull_request time: " << duration.count() << "us" << std::endl;
+			// }
 
 
-			return req;
+
+			// return req;
+
+
+			return pull_request(get_time());
       }
 
 

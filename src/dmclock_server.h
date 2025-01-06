@@ -548,7 +548,7 @@ namespace crimson {
 				// 如果time_diff大于等于时间间隔，则重启
 				if (time_diff >= interval) {
 					double time_rate = static_cast<double>(processed_requests) / (static_cast<double>(b0) * time_interval / 1000.0);
-					std::cout<<"time_rate:"<<time_rate<<"b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
+					// std::cout<<"time_rate:"<<time_rate<<"b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
 					cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * (time_rate>1?1:time_rate)));
 					begin_time = Clock::now();
 					processed_requests = 0;
@@ -2057,7 +2057,7 @@ namespace crimson {
 
 				cli_epoch->is_cumulative = false;
 				current_burst_client_count--;
-				std::cout<<k-1<<"突发客户端周期结束！"<< "cum_duration" << (cli_epoch->cum_duration).count() << "累积时长" << (std::chrono::duration_cast<Duration>(Clock::now() - cli_epoch->begin_time) + cli_epoch->cum_duration).count() <<std::endl;
+				// std::cout<<k-1<<"突发客户端周期结束！"<< "cum_duration" << (cli_epoch->cum_duration).count() << "累积时长" << (std::chrono::duration_cast<Duration>(Clock::now() - cli_epoch->begin_time) + cli_epoch->cum_duration).count() <<std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 			}
 

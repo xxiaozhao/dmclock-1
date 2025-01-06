@@ -74,11 +74,20 @@ class TestServer {
 public:
     TestServer(uint64_t _iops_capacity) :
         iops_capacity(_iops_capacity),
-        service_time(std::chrono::microseconds(1000000 / _iops_capacity)) {}
+        service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity)-2:0)) {
+            std::cout << "service_time: " << service_time.count() << "us" << std::endl;
+        }
 
     void process_request(const TestRequest& req, std::function<void(TestResponse)> cb) {
         try {
-            std::this_thread::sleep_for(service_time);
+            auto start = std::chrono::high_resolution_clock::now();
+            auto end = start + service_time;
+
+            while (std::chrono::high_resolution_clock::now() < end) {
+                // 使用pause指令来减少功耗（仅在x86架构上有效）
+                asm volatile("pause" ::: "memory");
+            }
+
             cb(TestResponse(req));
         } catch (const std::exception& e) {
             std::ofstream log_file("error_log.txt", std::ios::app);
@@ -110,11 +119,12 @@ public:
 int main() {
 
     // 解析命令行参数
-    int num_normal_clients = 10000;
+    int num_normal_clients = 500;
     int num_burst_clients = 0;
 
+
     // 创建服务器
-    auto server = std::make_shared<TestServer>(10000000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(500000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;

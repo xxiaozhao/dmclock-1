@@ -74,7 +74,8 @@ class TestServer {
 public:
     TestServer(uint64_t _iops_capacity) :
         iops_capacity(_iops_capacity),
-        service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity)-2:0)) {
+        // service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity):0)) {
+        service_time(std::chrono::microseconds(1000000 / _iops_capacity)) {
             std::cout << "service_time: " << service_time.count() << "us" << std::endl;
         }
 
@@ -120,11 +121,11 @@ public:
 int main() {
 
     // 解析命令行参数
-    int num_normal_clients = 0;
-    int num_burst_clients = 500;
+    int num_normal_clients = 1;
+    int num_burst_clients = 0;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(500000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(5000000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -139,7 +140,7 @@ int main() {
     }
 
     // 创建dmclock队列
-    crimson::dmclock::ClientInfo normal_info(0.0, 1.0, 100.0);
+    crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 0.0);
     crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 1000.0, 100, 1000);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
