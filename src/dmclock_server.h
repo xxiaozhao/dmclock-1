@@ -2030,7 +2030,7 @@ namespace crimson {
 
       void do_period() {
 		// 更新周期号
-		std::cout<<"do_period"<<std::endl;
+		// std::cout<<"do_period"<<std::endl;
 		epoch.update_epoch();
 
 	if (!burst_client_map.empty()) {

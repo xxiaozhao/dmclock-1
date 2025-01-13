@@ -74,7 +74,8 @@ class TestServer {
 public:
     TestServer(uint64_t _iops_capacity) :
         iops_capacity(_iops_capacity),
-        service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity)-2:0)) {
+        // service_time(std::chrono::microseconds(_iops_capacity < 500000?(1000000 / _iops_capacity)-2:0)) {
+        service_time(std::chrono::microseconds(1000000 / _iops_capacity)) {
             std::cout << "service_time: " << service_time.count() << "us" << std::endl;
         }
 
@@ -105,26 +106,26 @@ public:
     }
 };
 
-// int main(int argc, char* argv[]) {
-//     // 检查命令行参数
-//     if (argc < 3) {
-//         std::cerr << "Usage: " << argv[0] << " <number_of_normal_clients> <number_of_burst_clients>" << std::endl;
-//         return 1;
-//     }
-
-//     // 解析命令行参数
-//     int num_normal_clients = std::atoi(argv[1]);
-//     int num_burst_clients = std::atoi(argv[2]);
-
-int main() {
+int main(int argc, char* argv[]) {
+    // 检查命令行参数
+    if (argc < 3) {
+        std::cerr << "Usage: " << argv[0] << " <number_of_normal_clients> <number_of_burst_clients>" << std::endl;
+        return 1;
+    }
 
     // 解析命令行参数
-    int num_normal_clients = 500;
-    int num_burst_clients = 0;
+    int num_normal_clients = std::atoi(argv[1]);
+    int num_burst_clients = std::atoi(argv[2]);
+
+// int main() {
+
+//     // 解析命令行参数
+//     int num_normal_clients = 500;
+//     int num_burst_clients = 0;
 
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(500000); // 1000 IOPS capacity
+    auto server = std::make_shared<TestServer>(50000000); // 1000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -139,7 +140,7 @@ int main() {
     }
 
     // 创建dmclock队列
-    crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 100.0);
+    crimson::dmclock::ClientInfo normal_info(5.0, 1.0, 0.0);
     // crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 100.0, 10, 100);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
@@ -185,52 +186,37 @@ int main() {
             } else if (retn.phase == crimson::dmclock::PhaseType::priority) {
                 ++priority_count;
             }
+            server->process_request(
+                *retn.request,
+                [&](const TestResponse& resp) {
+                    // 计算请求处理时间
+                    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                        resp.end_time - resp.req.start_time).count();
+                    
+                    // 获取当前时间点
+                    auto current_time = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        current_time - start_time).count();
 
-            try {
-                server->process_request(
-                    *retn.request,
-                    [&](const TestResponse& resp) {
-                        // 计算请求处理时间
-                        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                            resp.end_time - resp.req.start_time).count();
-                        
-                        // 获取当前时间点
-                        auto current_time = std::chrono::steady_clock::now();
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                            current_time - start_time).count();
+                    // // 打印突发请求处理情况
+                    //         std::cout << "Time: " << elapsed << "s | "
+                    //          << "Client: " << (std::to_string(retn.client)) 
+                    //          << " | Request ID: " << resp.req.id
+                    //          << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
+                    //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
+                    //          << " | Processing Time: " << duration << "us"
+                    //          << std::endl;
 
-                        // // 打印突发请求处理情况
-                        //         std::cout << "Time: " << elapsed << "s | "
-                        //          << "Client: " << (std::to_string(retn.client)) 
-                        //          << " | Request ID: " << resp.req.id
-                        //          << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
-                        //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
-                        //          << " | Processing Time: " << duration << "us"
-                        //          << std::endl;
-
-                        // 完成请求处理
-                        if (retn.client >= num_normal_clients) {
-                            burst_clients[retn.client - num_normal_clients]->request_complete();
-                        } else {
-                            normal_clients[retn.client]->request_complete();
-                            auto req = normal_clients[retn.client]->create_request();
-                            queue.add_request(std::move(req), retn.client, crimson::dmclock::ReqParams(0, 0));
-                        }
+                    // 完成请求处理
+                    if (retn.client >= num_normal_clients) {
+                        burst_clients[retn.client - num_normal_clients]->request_complete();
+                    } else {
+                        normal_clients[retn.client]->request_complete();
+                        auto req = normal_clients[retn.client]->create_request();
+                        queue.add_request(std::move(req), retn.client, crimson::dmclock::ReqParams(0, 0));
                     }
-                );
-            } catch (const std::exception& e) {
-                std::ofstream log_file("error_log.txt", std::ios::app);
-                if (log_file.is_open()) {
-                    log_file << "Exception caught:拉取请求 " << e.what() << std::endl;
-                    log_file.close();
                 }
-            } catch (...) {
-                std::ofstream log_file("error_log.txt", std::ios::app);
-                if (log_file.is_open()) {
-                    log_file << "Unknown exception caught:拉取请求" << std::endl;
-                    log_file.close();
-                }
-            }
+            );
         }
     }
 
