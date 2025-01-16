@@ -528,30 +528,35 @@ namespace crimson {
 				processed_requests = 0;
 				current_burst_client_count++;
 				burst_client_count = current_burst_client_count;
-				// std::cout<<id<<"开始计时！"<< std::endl;
+				// std::cout<<"客户端"<<id<<"开始计时！"<< std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 
 			}
 
 
 			void restart(){
-				int time_interval = 10;
+				if(is_cumulative == true)
+				{
 
-				Duration interval = std::chrono::milliseconds(time_interval);
+					int time_interval = 10;
 
-				// 当前时间
-				TimePoint current_time = Clock::now();
+					Duration interval = std::chrono::milliseconds(time_interval);
 
-				// 当前时间与开始时间的时间差
-				Duration time_diff = std::chrono::duration_cast<Duration>(current_time - begin_time);
+					// 当前时间
+					TimePoint current_time = Clock::now();
 
-				// 如果time_diff大于等于时间间隔，则重启
-				if (time_diff >= interval) {
-					double time_rate = static_cast<double>(processed_requests) / (static_cast<double>(b0) * time_interval / 1000.0);
-					// std::cout<<"time_rate:"<<time_rate<<"b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
-					cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * (time_rate>1?1:time_rate)));
-					begin_time = Clock::now();
-					processed_requests = 0;
+					// 当前时间与开始时间的时间差
+					Duration time_diff = std::chrono::duration_cast<Duration>(current_time - begin_time);
+
+					// 如果time_diff大于等于时间间隔，则重启
+					if (time_diff >= interval) {
+						double time_rate = static_cast<double>(processed_requests) / ((static_cast<double>(b0) * time_interval / 1000.0));
+						// std::cout<<"time_rate:"<<time_rate<<"     b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
+						// std::cout<<"time_interval:"<<time_interval<<std::endl;
+						cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * (time_rate>1?1:time_rate)));
+						begin_time = Clock::now();
+						processed_requests = 0;
+					}
 				}
 			}
 
@@ -569,7 +574,7 @@ namespace crimson {
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
 					end(current_burst_client_count, id);
-					// std::cout<<id<<"时间片耗尽！"<< std::endl;
+					std::cout<<id<<"时间片耗尽！"<< std::endl;
 					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
 					start(current_burst_client_count,id);
@@ -586,7 +591,10 @@ namespace crimson {
 				is_cumulative = false;
 				current_burst_client_count--;
 				if (cum_duration >= duration)
+				{
 					is_limit = true;
+					// std::cout<<"客户端"<<id<<"运行结束"<<std::endl;
+				}
 
 				// std::cout << "累积时长: " << cum_duration.count() << " 毫秒" << std::endl;
 
@@ -1619,6 +1627,7 @@ namespace crimson {
 			if(!top.has_request())
 			{
 				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
+				top.idle == true;		//没有请求后立马将客户端设置空闲
 				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
@@ -1787,6 +1796,19 @@ namespace crimson {
 	if(!burst_ready_heap.empty()){
 
 		auto limits = &burst_limit_heap.top();
+
+		// if(limits->client ==0)
+		// {
+		// 	std::cout<<"客户端id为0"<<std::endl;
+		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
+		// }
+
+		// if(limits->client ==1)
+		// {
+		// 	std::cout<<"客户端id为1"<<std::endl;
+		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
+		// }
+
 		while (limits->has_request() &&
 			!limits->next_request().tag.ready &&
 			std::get<ClientEpoch>(limits->client_date).is_limit == false &&
@@ -1796,6 +1818,19 @@ namespace crimson {
 		burst_limit_heap.demote(*limits);
 
 		limits = &burst_limit_heap.top();
+
+		// if(limits->client ==0)
+		// {
+		// 	std::cout<<"客户端id为0"<<std::endl;
+		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
+		// }
+
+		// if(limits->client ==1)
+		// {
+		// 	std::cout<<"客户端id为1"<<std::endl;
+		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
+		// }
+
 		}
 
 		auto& readys = burst_ready_heap.top();
@@ -1805,32 +1840,71 @@ namespace crimson {
 
 
 			auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
-			if(state == 1)
+			if(state == 1)		//刚启动
 			{
 				readys.next_request().tag.limit = get_time()+readys.info->limit_inv;
 				// std::cout << "初始化限制标签"  << std::endl;
+
+				if (readys.idle) {
+				
+				constexpr double lowest_prop_tag_trigger =
+					std::numeric_limits<double>::max() / 3.0;
+
+				double lowest_prop_tag = std::numeric_limits<double>::max();
+				for (auto const &c : burst_client_map) {
+					// don't use ourselves (or anything else that might be
+					// listed as idle) since we're now in the map
+					if (!c.second->idle) {
+					double p;
+					// use either lowest proportion tag or previous proportion tag
+					if (c.second->has_request()) {
+					p = c.second->next_request().tag.proportion +
+					c.second->prop_delta;
+					} else {
+						p = c.second->get_req_tag().proportion + c.second->prop_delta;
+					}
+
+					if (p < lowest_prop_tag) {
+					lowest_prop_tag = p;
+					}
+					}
+				}
+
+				// if this conditional does not fire, it
+				if (lowest_prop_tag < lowest_prop_tag_trigger) {
+					readys.prop_delta = lowest_prop_tag - readys.prev_tag.proportion;
+				}
+				readys.idle = false;
+				} // if this client was idle
+
+
+
+			}else if(state == 2)		//中间请求
+			{
+				
+			}else if(state == 0){		//时间片耗尽————idle==true
+				readys.idle = true;
 			}
 
 
+						// 动态生成日志文件名
+            std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
 
-			// 			// 动态生成日志文件名
-            // std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
+            // 打开对应的日志文件
+            std::ofstream log_file(log_filename, std::ios::app);
+            if (log_file.is_open()) {
 
-            // // 打开对应的日志文件
-            // std::ofstream log_file(log_filename, std::ios::app);
-            // if (log_file.is_open()) {
-
-            // // 记录即将出队的请求的客户端ID
-			// log_file << "周期: " << epoch.num << " " 
-            // << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
-			// << "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
-			// << "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
-			// << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
+            // 记录即将出队的请求的客户端ID
+			log_file << "周期: " << epoch.num << " " 
+            << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
+			<< "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
+			<< "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
+			<< "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
 			
 
-            // // 关闭日志文件
-            // log_file.close();
-			// }
+            // 关闭日志文件
+            log_file.close();
+			}
 
 
 		return NextReq(HeapId::burst);
@@ -2030,7 +2104,7 @@ namespace crimson {
 
       void do_period() {
 		// 更新周期号
-		// std::cout<<"do_period"<<std::endl;
+		std::cout<<"\ndo_period"<<std::endl;
 		epoch.update_epoch();
 
 	if (!burst_client_map.empty()) {
@@ -2056,7 +2130,7 @@ namespace crimson {
 			if(cli_epoch->is_cumulative == true){
 
 				cli_epoch->is_cumulative = false;
-				current_burst_client_count--;
+				current_burst_client_count--;			//这里会瞬减
 				// std::cout<<k-1<<"突发客户端周期结束！"<< "cum_duration" << (cli_epoch->cum_duration).count() << "累积时长" << (std::chrono::duration_cast<Duration>(Clock::now() - cli_epoch->begin_time) + cli_epoch->cum_duration).count() <<std::endl;
 				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
 			}
@@ -2070,7 +2144,7 @@ namespace crimson {
 		// (i2->second->prev_tag).proportion = 1;
 
         } // for
-		}
+	}//!burst_client_map.empty()
 
 
 		// //咯咯哒
