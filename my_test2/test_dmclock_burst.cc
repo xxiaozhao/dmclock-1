@@ -143,7 +143,7 @@ int main(int argc, char* argv[]) {
 //     int num_burst_clients = 0;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(500000000); // 500000000 IOPS capacity
+    auto server = std::make_shared<TestServer>(500); // 500000000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -159,8 +159,8 @@ int main(int argc, char* argv[]) {
 
     // 创建dmclock队列
     crimson::dmclock::ClientInfo normal_info(0.0, 1.0, 0.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 1.0, 500.0, 100, 500);
-    crimson::dmclock::ClientInfo burst_info_high(0.0, 1.0, 1000.0, 100, 1000);
+    crimson::dmclock::ClientInfo burst_info(0.0, 1000.0, 100.0, 10, 100);
+    crimson::dmclock::ClientInfo burst_info_high(0.0, 1.0, 100.0, 10, 100);
 
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
         if (client_id >= num_normal_clients) { // burst client id
@@ -204,7 +204,7 @@ int main(int argc, char* argv[]) {
                     requests_to_add--;
                 }
 
-                std::cout<<"首次添加完成："<<burst_clients[i]->outstanding_ops<<std::endl;
+                // std::cout<<"首次添加完成："<<burst_clients[i]->outstanding_ops<<std::endl;
             burst_clients[i]->next_request_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000); // 生成新的随机时间间隔，范围为500到1000毫秒
         }
 
@@ -287,15 +287,15 @@ int main(int argc, char* argv[]) {
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                         current_time - start_time).count();
 
-                    // // 打印突发请求处理情况
-                    // if(retn.phase == crimson::dmclock::PhaseType::burst)
-                    //         std::cout << "Time: " << elapsed << "s | "
-                    //          << "Client: " << (std::to_string(retn.client)) 
-                    //          << " | Request ID: " << resp.req.id
-                    //          << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
-                    //                            retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
-                    //          << " | Processing Time: " << duration << "us"
-                    //          << std::endl;
+                    // 打印突发请求处理情况
+                    if(retn.phase == crimson::dmclock::PhaseType::burst)
+                            std::cout << "Time: " << elapsed << "s | "
+                             << "Client: " << (std::to_string(retn.client)) 
+                             << " | Request ID: " << resp.req.id
+                             << " | Phase: " << (retn.phase == crimson::dmclock::PhaseType::reservation ? "RESV" :
+                                               retn.phase == crimson::dmclock::PhaseType::priority ? "PROP" : "BURST")
+                             << " | Processing Time: " << duration << "us"
+                             << std::endl;
 
 
                     // 完成请求处理
@@ -320,10 +320,10 @@ int main(int argc, char* argv[]) {
     }
 
 
-//   // 打印每个突发客户端处理的请求数量
-//     for(int i=0;i<every_burst_count.size();i++){
-//         std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
-//     }
+  // 打印每个突发客户端处理的请求数量
+    for(int i=0;i<every_burst_count.size();i++){
+        std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
+    }
 
     // 打印统计信息
     std::cout << "\n=== Final Statistics ===\n"

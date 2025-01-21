@@ -574,7 +574,7 @@ namespace crimson {
 				if (is_cumulative == true && (std::chrono::duration_cast<Duration>(Clock::now() - begin_time) + cum_duration >= duration))
 				{
 					end(current_burst_client_count, id);
-					std::cout<<id<<"时间片耗尽！"<< std::endl;
+					// std::cout<<id<<"时间片耗尽！"<< std::endl;
 					return 0;		// 时间片耗尽
 				}else if(is_cumulative == false){
 					start(current_burst_client_count,id);
@@ -1138,6 +1138,116 @@ namespace crimson {
 	}
       };
 
+
+
+		// std::get<ClientEpoch>(n1.client_date).is_limit == false
+
+
+	       template<double RequestTag::*tag_field,
+	       ReadyOption ready_opt,
+	       bool use_prop_delta>
+      struct ClientCompareBurst {
+	bool operator()(const ClientRec& n1, const ClientRec& n2) const {
+
+	//   std::cout<<"这里是比较函数"<<std::endl;
+	  if (n1.has_request()) {
+	    if (n2.has_request()) {
+	      const auto& t1 = n1.next_request().tag;
+	      const auto& t2 = n2.next_request().tag;
+		  const auto& n1_is_limit = std::get<ClientEpoch>(n1.client_date).is_limit;
+		  const auto& n2_is_limit = std::get<ClientEpoch>(n2.client_date).is_limit;
+
+	      if (t1.ready == t2.ready && n1_is_limit == n2_is_limit) {
+			// if we don't care about ready or the ready values are the same
+			if (use_prop_delta) {
+			
+				// bool comparison_result = (t1.*tag_field + n1.prop_delta) < (t2.*tag_field + n2.prop_delta);
+				// std::cout 
+				// 	<< ((ReadyOption::raises == ready_opt) ? "权重队列：   " : "限制队列：   ")
+				// 	<< "ready,limit都相等"
+				// 	<< " n1: " << (t1.*tag_field + n1.prop_delta)
+				// 	<< " n2: " << (t2.*tag_field + n2.prop_delta)
+				// 	<< " return: " << (comparison_result ? "true" : "false")
+				// 	<< std::endl;
+
+			return (t1.*tag_field + n1.prop_delta) <
+				(t2.*tag_field + n2.prop_delta);
+			} else {
+
+				// std::cout 
+				// << ((ReadyOption::raises == ready_opt) ? "权重队列：   " : "限制队列：   ")
+				// << " ready,limit都相等 "
+				// << " n1: " << t1.*tag_field
+				// << " n2: " << t2.*tag_field
+				// << " return: " << ((t1.*tag_field < t2.*tag_field) ? "true" : "false")
+				// << std::endl;
+
+
+			return t1.*tag_field < t2.*tag_field;
+			}
+	      }else if(t1.ready == t2.ready && n1_is_limit != n2_is_limit){
+
+				if (ReadyOption::raises == ready_opt) {
+					// use_ready == true && the ready fields are different
+
+					// std::cout<<((ReadyOption::raises) == ready_opt?"权重队列：   ":"限制队列：   ")<<
+					// "ready相等,limit不等"<<
+					// "n1_limit"<<n1_is_limit<<
+					// "n2_limit"<<n2_is_limit<<
+					// "return:"<<n2_is_limit <<std::endl;
+
+
+					return n2_is_limit;
+				} else {
+
+					// std::cout<<((ReadyOption::raises) == ready_opt?"权重队列：   ":"限制队列：   ")<<
+					// "ready相等,limit不等"<<
+					// "n1_limit"<<n1_is_limit<<
+					// "n2_limit"<<n2_is_limit<<
+					// "return:"<<n2_is_limit <<std::endl;
+
+					return n1_is_limit;
+	     		}
+		  }else if(t1.ready != t2.ready){
+				if (ReadyOption::raises == ready_opt) {
+					// use_ready == true && the ready fields are different
+
+					// std::cout<<((ReadyOption::raises) == ready_opt?"权重队列：   ":"限制队列：   ")<<
+					// "ready不相等"<<
+					// "n1_ready"<<t1.ready<<
+					// "n2_ready"<<t2.ready<<
+					// "return:"<<t1.ready <<std::endl;
+
+					return t1.ready;
+				} else {
+
+					// std::cout<<((ReadyOption::raises) == ready_opt?"权重队列：   ":"限制队列：   ")<<
+					// "ready不相等"<<
+					// "n1_ready"<<t1.ready<<
+					// "n2_ready"<<t2.ready<<
+					// "return:"<<t2.ready <<std::endl;
+
+					return t2.ready;
+	      		}
+		  }
+	    } else {
+	      // n1 has request but n2 does not
+		//   std::cout<<"n1有请求但是n2没有请求"<<"return:true"<<std::endl;
+	      return true;
+	    }
+	  } else if (n2.has_request()) {
+	    // n2 has request but n1 does not
+		// std::cout<<"n1,n2都没有请求"<<"return:false"<<std::endl;
+	    return false;
+	  } 
+		// std::cout<<"n1没有请求但是n2有请求"<<"return:true"<<std::endl;
+	    // both have none; keep stable w false
+	    return false;
+	}
+      };
+
+
+
       ClientInfoFunc        client_info_f;
       static constexpr bool is_dynamic_cli_info_f = U1;
 
@@ -1191,7 +1301,7 @@ namespace crimson {
 	c::IndIntruHeap<ClientRecRef,
 		      ClientRec,
 		      &ClientRec::burst_lim_heap_data,
-		      ClientCompare<&RequestTag::limit,
+		      ClientCompareBurst<&RequestTag::limit,
 				    ReadyOption::lowers,					//限制措施后边再调
 				    false>,
 		      B> burst_limit_heap;
@@ -1199,7 +1309,7 @@ namespace crimson {
 	c::IndIntruHeap<ClientRecRef,
 		      ClientRec,
 		      &ClientRec::burst_ready_heap_data,
-		      ClientCompare<&RequestTag::proportion,
+		      ClientCompareBurst<&RequestTag::proportion,
 				    ReadyOption::raises,
 				    true>,
 		      B> burst_ready_heap;
@@ -1797,46 +1907,48 @@ namespace crimson {
 
 		auto limits = &burst_limit_heap.top();
 
-		// if(limits->client ==0)
-		// {
-		// 	std::cout<<"客户端id为0"<<std::endl;
-		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
-		// }
+		// std::cout<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
 
-		// if(limits->client ==1)
-		// {
-		// 	std::cout<<"客户端id为1"<<std::endl;
-		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
-		// }
 
 		while (limits->has_request() &&
-			!limits->next_request().tag.ready &&
-			std::get<ClientEpoch>(limits->client_date).is_limit == false &&
+			!(limits->next_request().tag.ready && std::get<ClientEpoch>(limits->client_date).is_limit == false )&&
 			limits->next_request().tag.limit <= now) {
+
+
+			// std::cout<<"客户端id为0"<<std::endl;
+			// std::cout<<"前id："<<limits->client<<" 是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
+
+
 		limits->next_request().tag.ready = true;
 		burst_ready_heap.promote(*limits);
 		burst_limit_heap.demote(*limits);
 
-		limits = &burst_limit_heap.top();
+		auto temp = &burst_limit_heap.top();
 
-		// if(limits->client ==0)
-		// {
-		// 	std::cout<<"客户端id为0"<<std::endl;
-		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
-		// }
-
-		// if(limits->client ==1)
-		// {
-		// 	std::cout<<"客户端id为1"<<std::endl;
-		// 	std::get<ClientEpoch>(limits->client_date).is_limit = false;
-		// }
+		if(limits->client == temp->client){
+			// std::cout<<"相等"<<std::endl;
+			break;
+		}
+			
+		
+		limits = temp;
+		// std::cout<<"后id："<<temp->client<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
 
 		}
 
+		// std::cout<<"跳出循环！！！！！！！！！！！！！！！！！"<<std::endl;
+
 		auto& readys = burst_ready_heap.top();
+
+
+		// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
+
 		if (readys.has_request() &&
 			readys.next_request().tag.ready &&
+			std::get<ClientEpoch>(readys.client_date).is_limit ==false &&
 			readys.next_request().tag.proportion < max_tag) {
+
+			// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
 
 
 			auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
@@ -1884,27 +1996,31 @@ namespace crimson {
 				
 			}else if(state == 0){		//时间片耗尽————idle==true
 				readys.idle = true;
+
+				burst_ready_heap.promote(readys);  // 将准备好的请求放入 `ready` 堆
+				burst_limit_heap.demote(readys);  // 从 `limit` 堆中移除当前请求
+
 			}
 
 
-						// 动态生成日志文件名
-            std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
+			// 			// 动态生成日志文件名
+            // std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
 
-            // 打开对应的日志文件
-            std::ofstream log_file(log_filename, std::ios::app);
-            if (log_file.is_open()) {
+            // // 打开对应的日志文件
+            // std::ofstream log_file(log_filename, std::ios::app);
+            // if (log_file.is_open()) {
 
-            // 记录即将出队的请求的客户端ID
-			log_file << "周期: " << epoch.num << " " 
-            << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
-			<< "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
-			<< "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
-			<< "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
+            // // 记录即将出队的请求的客户端ID
+			// log_file << "周期: " << epoch.num << " " 
+            // << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
+			// << "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
+			// << "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
+			// << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
 			
 
-            // 关闭日志文件
-            log_file.close();
-			}
+            // // 关闭日志文件
+            // log_file.close();
+			// }
 
 
 		return NextReq(HeapId::burst);
@@ -1990,11 +2106,11 @@ namespace crimson {
 	  assert(!next.tag.ready || max_tag == next.tag.proportion);
 	  next_call = min_not_0_time(next_call, next.tag.limit);
 	}
-	if (!burst_ready_heap.empty() && burst_limit_heap.top().has_request()) {
-	  const auto& next = burst_limit_heap.top().next_request();
-	  assert(!next.tag.ready || max_tag == next.tag.proportion);
-	  next_call = min_not_0_time(next_call, next.tag.limit);
-	}
+	// if (!burst_ready_heap.empty() && burst_limit_heap.top().has_request()) {
+	//   const auto& next = burst_limit_heap.top().next_request();
+	//   assert(!next.tag.ready || max_tag == next.tag.proportion);
+	//   next_call = min_not_0_time(next_call, next.tag.limit);
+	// }
 	if (next_call < TimeMax) {
 	  return NextReq(next_call);
 	} else {
@@ -2137,13 +2253,45 @@ namespace crimson {
 
 			cli_epoch->cum_duration = std::chrono::milliseconds(0);
 			cli_epoch->begin_time = Clock::now();
-  			cli_epoch->is_limit = false;
+  			// cli_epoch->is_limit = false;
+			if(cli_epoch->is_limit == true){
+				cli_epoch->is_limit = false;
+				burst_ready_heap.promote(*i2->second);  // 将准备好的请求放入 `ready` 堆
+				burst_limit_heap.demote(*i2->second);  // 从 `limit` 堆中移除当前请求
+			}
+
+			
 
      	 	}
 
-		// (i2->second->prev_tag).proportion = 1;
-
         } // for
+
+
+
+		// auto i2 = burst_client_map.begin();
+		// auto limits = &i2->second;
+
+		// while (limits->has_request() &&
+		// 	(!limits->next_request().tag.ready || std::get<ClientEpoch>(limits->client_date).is_limit) &&
+		// 	limits->next_request().tag.limit <= get_time()) 
+		// {
+		// 	// 将请求标记为已准备好
+		// 	limits->next_request().tag.ready = true;
+
+		// 	// 更新堆中的元素
+		// 	burst_ready_heap.promote(*limits);  // 将准备好的请求放入 `ready` 堆
+		// 	burst_limit_heap.demote(*limits);  // 从 `limit` 堆中移除当前请求
+
+		// 	// 更新 `limits` 指针为堆中下一个元素
+		// 	if (!burst_limit_heap.empty()) {
+		// 		limits = &burst_limit_heap.top();  // 取堆顶元素
+		// 	} else {
+		// 		break;  // 如果 `burst_limit_heap` 已空，退出循环
+		// 	}
+		// }
+
+
+
 	}//!burst_client_map.empty()
 
 
