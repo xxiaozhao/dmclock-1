@@ -390,6 +390,9 @@ namespace crimson {
       template<double RequestTag::*, ReadyOption, bool>
       struct ClientCompare;
 
+		template<double RequestTag::*, ReadyOption, bool>
+	  struct ClientCompareBurst;
+
       class ClientReq {
 	friend PriorityQueueBase;
 
@@ -551,9 +554,14 @@ namespace crimson {
 					// 如果time_diff大于等于时间间隔，则重启
 					if (time_diff >= interval) {
 						double time_rate = static_cast<double>(processed_requests) / ((static_cast<double>(b0) * time_interval / 1000.0));
+
+
 						// std::cout<<"time_rate:"<<time_rate<<"     b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
 						// std::cout<<"time_interval:"<<time_interval<<std::endl;
+
+
 						cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * (time_rate>1?1:time_rate)));
+						// cum_duration = cum_duration + Duration(static_cast<long long>(time_diff.count() * time_rate));
 						begin_time = Clock::now();
 						processed_requests = 0;
 					}
@@ -1301,7 +1309,7 @@ namespace crimson {
 	c::IndIntruHeap<ClientRecRef,
 		      ClientRec,
 		      &ClientRec::burst_lim_heap_data,
-		      ClientCompareBurst<&RequestTag::limit,
+		      ClientCompare<&RequestTag::limit,
 				    ReadyOption::lowers,					//限制措施后边再调
 				    false>,
 		      B> burst_limit_heap;
@@ -1911,7 +1919,7 @@ namespace crimson {
 
 
 		while (limits->has_request() &&
-			!(limits->next_request().tag.ready && std::get<ClientEpoch>(limits->client_date).is_limit == false )&&
+			!limits->next_request().tag.ready&&
 			limits->next_request().tag.limit <= now) {
 
 
@@ -1923,20 +1931,10 @@ namespace crimson {
 		burst_ready_heap.promote(*limits);
 		burst_limit_heap.demote(*limits);
 
-		auto temp = &burst_limit_heap.top();
-
-		if(limits->client == temp->client){
-			// std::cout<<"相等"<<std::endl;
-			break;
-		}
-			
-		
-		limits = temp;
-		// std::cout<<"后id："<<temp->client<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
+		limits = &burst_limit_heap.top();
 
 		}
 
-		// std::cout<<"跳出循环！！！！！！！！！！！！！！！！！"<<std::endl;
 
 		auto& readys = burst_ready_heap.top();
 
@@ -1997,8 +1995,8 @@ namespace crimson {
 			}else if(state == 0){		//时间片耗尽————idle==true
 				readys.idle = true;
 
-				burst_ready_heap.promote(readys);  // 将准备好的请求放入 `ready` 堆
-				burst_limit_heap.demote(readys);  // 从 `limit` 堆中移除当前请求
+				burst_ready_heap.adjust(readys); 
+				// burst_limit_heap.demote(readys);
 
 			}
 
@@ -2242,6 +2240,7 @@ namespace crimson {
   		if (auto cli_epoch = std::get_if<ClientEpoch>(&i2->second->client_date)) {
 
   			
+			i2->second->idle = true;
 
 			if(cli_epoch->is_cumulative == true){
 
@@ -2256,8 +2255,8 @@ namespace crimson {
   			// cli_epoch->is_limit = false;
 			if(cli_epoch->is_limit == true){
 				cli_epoch->is_limit = false;
-				burst_ready_heap.promote(*i2->second);  // 将准备好的请求放入 `ready` 堆
-				burst_limit_heap.demote(*i2->second);  // 从 `limit` 堆中移除当前请求
+				burst_ready_heap.adjust(*i2->second);
+				// burst_limit_heap.demote(*i2->second);
 			}
 
 			
