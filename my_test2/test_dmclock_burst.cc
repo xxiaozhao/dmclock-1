@@ -143,7 +143,7 @@ int main(int argc, char* argv[]) {
 //     int num_burst_clients = 0;
 
     // 创建服务器
-    auto server = std::make_shared<TestServer>(2000); // 500000000 IOPS capacity
+    auto server = std::make_shared<TestServer>(5000000); // 500000000 IOPS capacity
 
     // 创建普通客户端
     std::vector<std::shared_ptr<TestClient>> normal_clients;
@@ -154,7 +154,7 @@ int main(int argc, char* argv[]) {
     // 创建突发客户端
     std::vector<std::shared_ptr<TestClient>> burst_clients;
     for (int i = 0; i < num_burst_clients; ++i) {
-        burst_clients.push_back(std::make_shared<TestClient>(1000, 1000, true));
+        burst_clients.push_back(std::make_shared<TestClient>(100, 100, true));
     }
 
     // 创建dmclock队列
@@ -320,10 +320,10 @@ int main(int argc, char* argv[]) {
     }
 
 
-  // 打印每个突发客户端处理的请求数量
-    for(int i=0;i<every_burst_count.size();i++){
-        std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
-    }
+//   // 打印每个突发客户端处理的请求数量
+//     for(int i=0;i<every_burst_count.size();i++){
+//         std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
+//     }
 
     // 打印统计信息
     std::cout << "\n=== Final Statistics ===\n"

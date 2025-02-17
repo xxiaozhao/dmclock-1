@@ -33,6 +33,7 @@
 #include <algorithm> // for std::fill
 #include <cmath> // for std::abs
 #include <variant>
+#include <vector>
 
 
 #include <cmath>
@@ -354,6 +355,60 @@ namespace crimson {
 	return out;
       }
     }; // class RequestTag
+
+
+
+
+	
+	// 环形缓冲区类，一个客户端一次可以拉取多个请求
+	template <typename T>
+	class CircularQueue {
+	private:
+		std::vector<T> buffer;  // 存储数据的数组
+		size_t head;            // 指向队头元素
+		size_t tail;            // 指向队尾元素（下一个插入位置）
+		size_t capacity;        // 队列的总容量
+		size_t count;           // 队列当前的元素个数
+
+	public:
+		explicit CircularQueue(size_t size) 
+			: buffer(size), head(0), tail(0), capacity(size), count(0) {}
+
+		// 入队，支持移动语义
+		bool push(T&& value) {
+			if (count == capacity) return false; // 队列满，无法插入
+			buffer[tail] = std::move(value);
+			tail = (tail + 1) % capacity;  // 采用取模运算实现循环
+			++count;
+			return true;
+		}
+
+		// 获取队头元素（支持移动）
+		T&& front() {
+			if (count == 0) throw std::runtime_error("Queue is empty!");
+			return std::move(buffer[head]);
+		}
+
+		// 出队
+		bool pop_front() {
+			if (count == 0) return false; // 队列空，无法出队
+			head = (head + 1) % capacity; // 头指针后移
+			--count;
+			return true;
+		}
+
+		// 判断队列是否为空
+		bool empty() const { return count == 0; }
+
+		// 判断队列是否已满
+		bool full() const { return count == capacity; }
+
+		// 获取队列当前大小
+		size_t size() const { return count; }
+
+		// 剩余空间大小
+		size_t idle() const {return capacity - count;}
+	};
 
     // C is client identifier type, R is request type,
     // IsDelayed controls whether tag calculation is delayed until the request
@@ -809,7 +864,7 @@ namespace crimson {
       enum class NextReqType { returning, future, none };
 
       // specifies which queue next request will get popped from
-      enum class HeapId { reservation, ready, burst };
+      enum class HeapId { reservation, ready, burst};
 
       // this is returned from next_req to tell the caller the situation
       struct NextReq {
@@ -1273,6 +1328,8 @@ namespace crimson {
       std::map<C,ClientRecRef> client_map;
       // 突发客户端映射
       std::map<C,ClientRecRef> burst_client_map;
+	//   // 哈希
+	// std::unordered_map<C,ClientRecRef> burst_client_map;
 
       c::IndIntruHeap<ClientRecRef,
 		      ClientRec,
@@ -1392,6 +1449,9 @@ namespace crimson {
 	assert(_check_time < _idle_age);
 	// AtLimit::Reject depends on ImmediateTagCalc
 	assert(at_limit != AtLimit::Reject || !IsDelayed);
+
+	// // 哈希 预计存储 10000 个元素，预分配 20000 个桶
+	// burst_client_map.reserve(20000); 
 	cleaning_job =
 	  std::unique_ptr<RunEvery>(
 	    new RunEvery(check_time,
@@ -1766,6 +1826,80 @@ namespace crimson {
 
 	return tag;
       } // pop_process_request
+
+
+
+
+
+      // data_mtx should be held when called; top of heap should have
+      // a ready request
+      template<typename C1, IndIntruHeapData ClientRec::*C2, typename C3>
+      RequestTag burst_pop_process_request(IndIntruHeap<C1, ClientRec, C2, C3, B>& heap,
+			       std::function<void(const C& client,
+						  const Cost cost,
+						  RequestRef& request)> process,
+						  int count) {
+	// gain access to data
+	ClientRec& top = heap.top();
+	RequestTag tag = top.next_request().tag;
+
+	// const Time now = get_time() + top.info->limit_inv;
+	// && top.next_request().tag.limit <= now		// 细粒度限速
+	
+	//  环形缓冲区，粗粒度不限速
+	while(count>0 && top.has_request() ){
+		Cost request_cost = top.next_request().tag.cost;
+		RequestRef request = std::move(top.next_request().request);
+		tag = top.next_request().tag;
+
+		// pop request and adjust heaps
+		top.pop_request();
+
+		update_next_tag(TagCalc{}, top, tag);
+
+		// process
+		process(top.client, request_cost, request);
+
+		count--;
+	}
+
+	
+
+
+//	resv_heap.demote(top);
+//	limit_heap.adjust(top);
+//#if USE_PROP_HEAP
+//	prop_heap.demote(top);
+//#endif
+//	ready_heap.demote(top);
+
+
+	// 出队后只调整对应堆即可
+	if (auto cli_epoch = std::get_if<ClientEpoch>(&top.client_date)) {
+
+
+			// 如果该突发客户端没有后续请求，则暂停计数
+			if(!top.has_request())
+			{
+				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
+				top.idle == true;		//没有请求后立马将客户端设置空闲
+				std::cout<<"没有请求"<<std::endl;
+			}		
+			burst_limit_heap.adjust(top);
+			burst_ready_heap.demote(top);
+
+	}else{
+			resv_heap.demote(top);
+			limit_heap.adjust(top);
+		#if USE_PROP_HEAP
+			prop_heap.demote(top);
+		#endif
+			ready_heap.demote(top);
+	}
+
+	return tag;
+      } // bust_pop_process_request
+
 
 
       // data_mtx must be held by caller
@@ -2218,7 +2352,7 @@ namespace crimson {
 
       void do_period() {
 		// 更新周期号
-		std::cout<<"\ndo_period"<<std::endl;
+		// std::cout<<"\ndo_period"<<std::endl;
 		epoch.update_epoch();
 
 	if (!burst_client_map.empty()) {
@@ -2366,6 +2500,9 @@ namespace crimson {
       };
 
 
+	  CircularQueue<PullReq> Ring_Buffer;
+
+
 #ifdef PROFILE
       ProfileTimer<std::chrono::nanoseconds> pull_request_timer;
       ProfileTimer<std::chrono::nanoseconds> add_request_timer;
@@ -2380,7 +2517,8 @@ namespace crimson {
 			double _anticipation_timeout = 0.0) :
 	super(_client_info_f,
 	      _idle_age, _erase_age, _check_time,
-	      at_limit_param, _anticipation_timeout)
+	      at_limit_param, _anticipation_timeout),
+		  Ring_Buffer(20)
       {
 	// empty
       }
@@ -2505,6 +2643,14 @@ namespace crimson {
 
       PullReq pull_request(const Time now) {
 	PullReq result;
+
+	if(!Ring_Buffer.empty()){
+			result = Ring_Buffer.front();
+			Ring_Buffer.pop_front();
+			++this->burst_sched_count;
+			return result;
+	}
+
 	typename super::DataGuard g(this->data_mtx);
 	typename super::BurstDataGuard b(this->burst_data_mtx);
 #ifdef PROFILE
@@ -2543,6 +2689,28 @@ namespace crimson {
 	  };
 	};
 
+
+	auto burst_process_f =
+  [&] (CircularQueue<PullReq>& Ring_Buffer, PhaseType phase) ->
+  std::function<void(const C&, uint64_t, typename super::RequestRef&)> {
+  return [&Ring_Buffer, phase](const C& client,
+			       const Cost request_cost,
+			       typename super::RequestRef& request) {
+    PullReq pull_result;
+    pull_result.data = typename PullReq::Retn{ client,
+					       std::move(request),
+					       phase,
+					       request_cost };
+
+
+	pull_result.type = super::NextReqType::returning;
+
+    if (!Ring_Buffer.push(std::move(pull_result))) {
+      std::cerr << "Ring_Buffer is full, dropping request!" << std::endl;
+    }
+  };
+};
+
 	switch(next.heap_id) {
 	case super::HeapId::reservation:
 	  (void) super::pop_process_request(this->resv_heap,
@@ -2552,10 +2720,21 @@ namespace crimson {
 	  break;
 
 
-	// 突发请求处理逻辑
+	// // 突发请求处理逻辑
+	// case super::HeapId::burst:
+	//   (void) super::pop_process_request(this->burst_ready_heap,
+	// 			     process_f(result, PhaseType::burst));        
+	//   ++this->burst_sched_count;
+	//   break;
+
+
 	case super::HeapId::burst:
-	  (void) super::pop_process_request(this->burst_ready_heap,
-				     process_f(result, PhaseType::burst));        
+	  (void) super::burst_pop_process_request(this->burst_ready_heap,
+				     burst_process_f(Ring_Buffer, PhaseType::burst),
+					 Ring_Buffer.idle());   
+
+		result = Ring_Buffer.front();
+		Ring_Buffer.pop_front();   
 	  ++this->burst_sched_count;
 	  break;
 
