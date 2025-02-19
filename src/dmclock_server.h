@@ -448,6 +448,12 @@ namespace crimson {
 		template<double RequestTag::*, ReadyOption, bool>
 	  struct ClientCompareBurst;
 
+	  	template<double RequestTag::*, ReadyOption, bool>
+	  struct ClientCompareTypeLimit;
+	  	
+		template<double RequestTag::*, ReadyOption, bool>
+	  struct ClientCompareTypeReady;
+
       class ClientReq {
 	friend PriorityQueueBase;
 
@@ -685,6 +691,7 @@ namespace crimson {
       // associated with function submit_top_request.]
       class ClientRec {
 	friend PriorityQueueBase<C,R,IsDelayed,U1,B>;
+	friend class TypeNode;
 
 	C                     client;
 	RequestTag            prev_tag;
@@ -712,6 +719,10 @@ namespace crimson {
 	Counter               last_tick;
 	uint32_t              cur_rho;
 	uint32_t              cur_delta;
+
+	std::shared_ptr<ClientRec> prev = nullptr; // 前驱指针
+    std::shared_ptr<ClientRec> next = nullptr; // 后继指针
+	bool is_join = false;		// 是否加入链表
 
 
 
@@ -749,6 +760,11 @@ namespace crimson {
 	{
 	  // empty
 	}
+
+
+	 ClientRec() : prev_tag(0.0, 0.0, 0.0, TimeZero),info(nullptr), idle(false), last_tick(0), cur_rho(0), cur_delta(0),client_date(ClientType::ordinary) {
+        // 初始化为哨兵节点，不参与实际逻辑
+    }
 
 	inline const RequestTag& get_req_tag() const {
 	  return prev_tag;
@@ -858,6 +874,146 @@ namespace crimson {
 
       using ClientRecRef = std::shared_ptr<ClientRec>;
 
+
+
+class TypeNode {
+    friend PriorityQueueBase<C, R, IsDelayed, U1, B>;
+
+private:
+    const crimson::dmclock::ClientInfo* info; // 类型信息
+    ClientRecRef head; // 链表头（哨兵节点）
+    ClientRecRef next_process; // 下一个即将处理的节点
+    size_t client_count = 0; // 链表中有效客户端数量
+
+    c::IndIntruHeapData type_lim_heap_data {}; // 类型堆
+    c::IndIntruHeapData type_ready_heap_data {};
+
+public:
+    // 构造函数
+    TypeNode() : info(nullptr), head(std::make_shared<ClientRec>()), next_process(head), client_count(0) {
+        head->prev = head;
+        head->next = head;
+    }
+
+    // 构造函数
+    TypeNode(const crimson::dmclock::ClientInfo* info) : info(info), head(std::make_shared<ClientRec>()), next_process(head), client_count(0) {
+        head->prev = head;
+        head->next = head;
+    }
+
+    // 设置类型信息
+    void setInfo(const crimson::dmclock::ClientInfo* clientInfo) {
+        info = clientInfo;
+    }
+
+    // 获取类型信息
+    const crimson::dmclock::ClientInfo* getInfo() const {
+        return info;
+    }
+
+    // 插入客户端到链表的下一个处理节点的位置
+    void insert_at_next_process(ClientRecRef client) {
+        if (!client) return;
+
+        // 插入到下一个处理节点之前
+        client->prev = next_process->prev;
+        client->next = next_process;
+        next_process->prev->next = client;
+        next_process->prev = client;
+        client->is_join = true;
+
+        // 增加客户端计数
+        client_count++;
+
+        // 设置 新加节点为next_process
+        next_process = client;
+    }
+
+    // 如果没有请求则将其从当前队列中删除
+    void remove() {
+        ClientRecRef client = next_process;
+        if (!client || client == head || !client->is_join) return;
+
+        if (move_next_process() == client)
+            next_process = head;
+
+        client_count--;
+
+        // 删除结点
+        client->prev->next = client->next;
+        client->next->prev = client->prev;
+        client->prev = nullptr;
+        client->next = nullptr;
+        client->is_join = false;
+    }
+
+    // do_clean的时候从彻底删除
+    void remove(ClientRecRef cur_client) {
+        if (!cur_client || cur_client == head || !cur_client->is_join) return;
+
+        if (cur_client == next_process) {
+            remove();
+        } else {
+            // 从当前位置移除
+            cur_client->prev->next = cur_client->next;
+            cur_client->next->prev = cur_client->prev;
+            cur_client->next = nullptr;
+            cur_client->prev = nullptr;
+            cur_client->is_join = false;
+            client_count--;
+        }
+    }
+
+    // 从链表中移除客户端并放入末尾
+    void move_to_end() {
+        ClientRecRef client = next_process;
+        if (!client || client == head || !client->is_join) return;
+
+        if (move_next_process() == client)
+            next_process = head;
+
+        // 从当前位置移除
+        client->prev->next = client->next;
+        client->next->prev = client->prev;
+
+        // 移动到末尾
+        client->prev = head->prev;
+        client->next = head;
+        head->prev->next = client;
+        head->prev = client;
+    }
+
+    // 移动next_process指针
+    ClientRecRef move_next_process() {
+        if (next_process == head) {
+            return next_process;
+        } else if (next_process->next == head || std::get<ClientEpoch>(next_process->next->client_date).is_limit) {
+            next_process = head->next;
+        } else {
+            next_process = next_process->next;
+        }
+
+        return next_process;
+    }
+
+    // 获取链表中有效客户端数量
+    size_t get_client_count() const {
+        return client_count;
+    }
+
+    // 获取下一个要处理的客户端
+    ClientRecRef get_next_process_client()  const {
+        // 如果没有下一个处理节点，或者下一个节点是哨兵节点，重置为链表头
+        if (next_process == head) {
+            return nullptr;
+        } else {
+            return next_process;
+        }
+    }
+};
+
+
+using TypeNodeRef = std::shared_ptr<TypeNode>;
       // when we try to get the next request, we'll be in one of three
       // situations -- we'll have one to return, have one that can
       // fire in the future, or not have any
@@ -1310,6 +1466,90 @@ namespace crimson {
       };
 
 
+	    template<double RequestTag::*tag_field,
+	       ReadyOption ready_opt,
+	       bool use_prop_delta>
+      struct ClientCompareTypeLimit {
+	bool operator()(const TypeNode& type1, const TypeNode& type2) const {
+
+		
+	  if (type1.next_process != type1.head) {
+	    if (type2.next_process != type2.head) {
+
+				// 如果两个类型都有客户端存在则重新比较客户端
+
+				ClientRecRef client1 = type1.get_next_process_client();
+				ClientRecRef client2 = type1.get_next_process_client();
+
+				// 确保转换成功
+				if (!client1 || !client2) {
+					std::cout<<"类型转换失败！"<<std::endl;
+					return false; // 或者根据需要返回 true
+				}
+
+
+				ClientRec& n1 = *client1;
+				ClientRec& n2 = *client2;
+
+				ClientCompare<tag_field, ready_opt, use_prop_delta> client_compare;
+				return client_compare(n1, n2);
+
+	  		}  else {
+	      // n1 has request but n2 does not
+	      return true;
+	    }
+	  }else if (type2.next_process != type2.head) {
+	    // n2 has request but n1 does not
+	    return false;
+	  } else {
+	    // both have none; keep stable w false
+	    return false;
+	  }
+	}
+      };
+
+
+	    template<double RequestTag::*tag_field,
+	       ReadyOption ready_opt,
+	       bool use_prop_delta>
+      struct ClientCompareTypeReady {
+	bool operator()(const TypeNode& type1, const TypeNode& type2) const {
+
+		
+	  if (type1.next_process != type1.head) {
+	    if (type2.next_process != type2.head) {
+
+				ClientRecRef client1 = type1.get_next_process_client();
+				ClientRecRef client2 = type1.get_next_process_client();
+
+				// 确保转换成功
+				if (!client1 || !client2) {
+					std::cout<<"类型转换失败！"<<std::endl;
+					return false; // 或者根据需要返回 true
+				}
+
+
+				ClientRec& n1 = *client1;
+				ClientRec& n2 = *client2;
+
+				ClientCompareBurst<tag_field, ready_opt, use_prop_delta> client_compare;
+				return client_compare(n1, n2);
+
+	  		}  else {
+	      // n1 has request but n2 does not
+	      return true;
+	    }
+	  }else if (type2.next_process != type2.head) {
+	    // n2 has request but n1 does not
+	    return false;
+	  } else {
+	    // both have none; keep stable w false
+	    return false;
+	  }
+	}
+      };
+
+
 
       ClientInfoFunc        client_info_f;
       static constexpr bool is_dynamic_cli_info_f = U1;
@@ -1326,6 +1566,10 @@ namespace crimson {
 
       // stable mapping between client ids and client queues
       std::map<C,ClientRecRef> client_map;
+
+	  // 模板类型映射表
+      std::map<const crimson::dmclock::ClientInfo*,TypeNodeRef> type_client_map;
+
       // 突发客户端映射
       std::map<C,ClientRecRef> burst_client_map;
 	//   // 哈希
@@ -1367,7 +1611,7 @@ namespace crimson {
 		      ClientRec,
 		      &ClientRec::burst_lim_heap_data,
 		      ClientCompare<&RequestTag::limit,
-				    ReadyOption::lowers,					//限制措施后边再调
+				    ReadyOption::lowers,					
 				    false>,
 		      B> burst_limit_heap;
 
@@ -1378,6 +1622,23 @@ namespace crimson {
 				    ReadyOption::raises,
 				    true>,
 		      B> burst_ready_heap;
+
+
+	// 类型堆
+	c::IndIntruHeap<TypeNodeRef,
+		      TypeNode,
+		      &TypeNode::type_lim_heap_data,
+		      ClientCompareTypeLimit<&RequestTag::limit,
+				    ReadyOption::lowers,					//限制措施后边再调
+				    false>,
+		      B> type_limit_heap;
+	c::IndIntruHeap<TypeNodeRef,
+		      TypeNode,
+		      &TypeNode::type_ready_heap_data,
+		      ClientCompareTypeReady<&RequestTag::proportion,
+				    ReadyOption::raises,
+				    true>,
+		      B> type_ready_heap;
 
 
 
@@ -1664,9 +1925,26 @@ namespace crimson {
 			burst_ready_heap.push(client_rec);
 			insert.first->second = std::move(client_rec);
 			}
-
 			// for convenience, we'll create a reference to the shared pointer
 			ClientRec& client = *insert.first->second;
+
+
+			//  检查该类型是否存在
+			auto insert_type = type_client_map.emplace(client.info, TypeNodeRef{});
+			if(insert_type.second){
+				auto type_rec = std::make_shared<TypeNode>(client.info);
+				type_limit_heap.push(type_rec);
+				type_ready_heap.push(type_rec);
+				insert_type.first->second = std::move(type_rec);
+			}
+			TypeNode& type_client = *insert_type.first->second;
+			// 如果客户端不在类型列表中，则插入到类型队列里面
+			if(client.is_join == false){
+				
+				type_client.insert_at_next_process(insert.first->second);
+			}
+
+			
 
 			if (client.idle) {
 			// We need to do an adjustment so that idle clients compete
@@ -1805,7 +2083,7 @@ namespace crimson {
 			if(!top.has_request())
 			{
 				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
-				top.idle == true;		//没有请求后立马将客户端设置空闲
+				top.idle = true;		//没有请求后立马将客户端设置空闲
 				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
@@ -1863,17 +2141,6 @@ namespace crimson {
 		count--;
 	}
 
-	
-
-
-//	resv_heap.demote(top);
-//	limit_heap.adjust(top);
-//#if USE_PROP_HEAP
-//	prop_heap.demote(top);
-//#endif
-//	ready_heap.demote(top);
-
-
 	// 出队后只调整对应堆即可
 	if (auto cli_epoch = std::get_if<ClientEpoch>(&top.client_date)) {
 
@@ -1882,23 +2149,17 @@ namespace crimson {
 			if(!top.has_request())
 			{
 				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
-				top.idle == true;		//没有请求后立马将客户端设置空闲
+				top.idle = true;		//没有请求后立马将客户端设置空闲
 				std::cout<<"没有请求"<<std::endl;
 			}		
 			burst_limit_heap.adjust(top);
 			burst_ready_heap.demote(top);
 
-	}else{
-			resv_heap.demote(top);
-			limit_heap.adjust(top);
-		#if USE_PROP_HEAP
-			prop_heap.demote(top);
-		#endif
-			ready_heap.demote(top);
 	}
 
 	return tag;
-      } // bust_pop_process_request
+      } // 
+	  
 
 
 
@@ -2056,16 +2317,11 @@ namespace crimson {
 			!limits->next_request().tag.ready&&
 			limits->next_request().tag.limit <= now) {
 
+				limits->next_request().tag.ready = true;
+				burst_ready_heap.promote(*limits);
+				burst_limit_heap.demote(*limits);
 
-			// std::cout<<"客户端id为0"<<std::endl;
-			// std::cout<<"前id："<<limits->client<<" 是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
-
-
-		limits->next_request().tag.ready = true;
-		burst_ready_heap.promote(*limits);
-		burst_limit_heap.demote(*limits);
-
-		limits = &burst_limit_heap.top();
+				limits = &burst_limit_heap.top();
 
 		}
 
@@ -2270,6 +2526,7 @@ namespace crimson {
        * map and delete all server entries that were last used before
        * that mark point.
        */
+	  //   先不考虑删除类型节点的事情———减少系统开销？？？？？？？？？
       void do_clean() {
 	TimePoint now = std::chrono::steady_clock::now();
 	DataGuard g(data_mtx);
@@ -2318,6 +2575,14 @@ namespace crimson {
 	        erased_num < erase_max &&
 	        i2->second->last_tick <= erase_point) {
 	      delete_from_burst_heaps(i2->second);
+
+		// 从类型链表中删除该客户端
+		auto typenode_iter = type_client_map.find(i2->second->info);
+		if (typenode_iter != type_client_map.end()) {
+			typenode_iter->second->remove(i2->second);
+		}
+
+
 	      burst_client_map.erase(i2);
 	      erased_num++;
 	    } else if (idle_point && i2->second->last_tick <= idle_point) {
