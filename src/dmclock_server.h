@@ -636,7 +636,7 @@ namespace crimson {
 			int epoch_state(size_t& current_burst_client_count, int id){
 
 				//处理请求数+1
-				processed_requests++;
+				// processed_requests++;
 
 				restart();
 			
@@ -648,7 +648,7 @@ namespace crimson {
 				}else if(is_cumulative == false){
 					start(current_burst_client_count,id);
 					return 1;		// 刚启动
-				}				
+				}
 					return 2;		//中间请求
 			}
 
@@ -884,19 +884,20 @@ private:
     ClientRecRef head; // 链表头（哨兵节点）
     ClientRecRef next_process; // 下一个即将处理的节点
     size_t client_count = 0; // 链表中有效客户端数量
+	bool has_valid_client = false;
 
     c::IndIntruHeapData type_lim_heap_data {}; // 类型堆
     c::IndIntruHeapData type_ready_heap_data {};
 
 public:
     // 构造函数
-    TypeNode() : info(nullptr), head(std::make_shared<ClientRec>()), next_process(head), client_count(0) {
+    TypeNode() : info(nullptr), head(std::make_shared<ClientRec>()), next_process(head), client_count(0),has_valid_client(false) {
         head->prev = head;
         head->next = head;
     }
 
     // 构造函数
-    TypeNode(const crimson::dmclock::ClientInfo* info) : info(info), head(std::make_shared<ClientRec>()), next_process(head), client_count(0) {
+    TypeNode(const crimson::dmclock::ClientInfo* info) : info(info), head(std::make_shared<ClientRec>()), next_process(head), client_count(0),has_valid_client(false) {
         head->prev = head;
         head->next = head;
     }
@@ -924,9 +925,16 @@ public:
 
         // 增加客户端计数
         client_count++;
+		// 拥有有效客户端
+		if(has_valid_client == false){
+			has_valid_client = true;
+		}
 
         // 设置 新加节点为next_process
         next_process = client;
+
+
+		// std::cout<<"insert当前模板链表客户端数量:"<<client_count<<std::endl;
     }
 
     // 如果没有请求则将其从当前队列中删除
@@ -934,8 +942,12 @@ public:
         ClientRecRef client = next_process;
         if (!client || client == head || !client->is_join) return;
 
+		// 如果移除完成后没有有效客户端啦
         if (move_next_process() == client)
-            next_process = head;
+        {
+			next_process = head;
+			has_valid_client = false;
+		}
 
         client_count--;
 
@@ -945,6 +957,9 @@ public:
         client->prev = nullptr;
         client->next = nullptr;
         client->is_join = false;
+
+
+		// std::cout<<"remove当前模板链表客户端数量:"<<client_count<<std::endl;
     }
 
     // do_clean的时候从彻底删除
@@ -962,15 +977,21 @@ public:
             cur_client->is_join = false;
             client_count--;
         }
+
+		// std::cout<<"remove2当前模板链表客户端数量:"<<client_count<<std::endl;
     }
 
     // 从链表中移除客户端并放入末尾
     void move_to_end() {
         ClientRecRef client = next_process;
         if (!client || client == head || !client->is_join) return;
-
+		
+		// 如果移除完成后没有有效客户端啦
         if (move_next_process() == client)
-            next_process = head;
+        {
+			next_process = head;
+			has_valid_client = false;
+		}
 
         // 从当前位置移除
         client->prev->next = client->next;
@@ -981,6 +1002,9 @@ public:
         client->next = head;
         head->prev->next = client;
         head->prev = client;
+
+
+		// std::cout<<"to_end当前模板链表客户端数量:"<<client_count<<std::endl;
     }
 
     // 移动next_process指针
@@ -1102,8 +1126,18 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	  bool modified =
 	    i.second->remove_by_req_filter(filter_accum, visit_backwards);
 	  if (modified) {
-	    burst_limit_heap.adjust(*i.second);
-	    burst_ready_heap.adjust(*i.second);
+
+
+		// 替换为堆+链表——————当且仅当该请求是当前指针请求的时候调整
+		auto type_client = type_client_map.find(i->second->info);
+		if (type_client != type_client_map.end() && (type_client->second->next_process == i->second)) {
+			type_limit_heap.adjust(*type_client->second);
+			type_ready_heap.adjust(*type_client->second);
+		}
+
+
+	    // burst_limit_heap.adjust(*i.second);
+	    // burst_ready_heap.adjust(*i.second);
 	    any_removed = true;
 	  }
 	}
@@ -1207,8 +1241,17 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 
 	i->second->requests.clear();
 
-	burst_limit_heap.adjust(*i->second);
-	burst_ready_heap.adjust(*i->second);
+
+	// 替换为堆+链表——————当且仅当该请求是当前指针请求的时候调整
+	auto type_client = type_client_map.find(i->second->info);
+	if (type_client != type_client_map.end() && (type_client->second->next_process == i->second)) {
+		type_client->second->remove(i->second);
+		type_limit_heap.adjust(*type_client->second);
+		type_ready_heap.adjust(*type_client->second);
+	}
+
+	// burst_limit_heap.adjust(*i->second);
+	// burst_ready_heap.adjust(*i->second);
 	}
 
       }
@@ -1259,12 +1302,14 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	  out << " { ready_top:" << ready << " }";
 	  const auto& limit = q.limit_heap.top();
 	  out << " { limit_top:" << limit << " }";
-	}else if(!q.burst_ready_heap.empty()){
-	  const auto& burst_ready = q.burst_ready_heap.top();
-	  out << " { burst_ready_top:" << burst_ready << " }";
-	  const auto& burst_limit = q.burst_limit_heap.top();
-	  out << " { burst_limit_top:" << burst_limit << " }";
-	} else {
+	}
+	// else if(!q.burst_ready_heap.empty()){
+	//   const auto& burst_ready = q.burst_ready_heap.top();
+	//   out << " { burst_ready_top:" << burst_ready << " }";
+	//   const auto& burst_limit = q.burst_limit_heap.top();
+	//   out << " { burst_limit_top:" << burst_limit << " }";
+	// } 
+	else {
 	  out << " HEAPS-EMPTY";
 	}
 	out << " }";
@@ -1382,12 +1427,12 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 			
 				// bool comparison_result = (t1.*tag_field + n1.prop_delta) < (t2.*tag_field + n2.prop_delta);
 				// std::cout 
-				// 	<< ((ReadyOption::raises == ready_opt) ? "权重队列：   " : "限制队列：   ")
-				// 	<< "ready,limit都相等"
-				// 	<< " n1: " << (t1.*tag_field + n1.prop_delta)
-				// 	<< " n2: " << (t2.*tag_field + n2.prop_delta)
-				// 	<< " return: " << (comparison_result ? "true" : "false")
-				// 	<< std::endl;
+					// << ((ReadyOption::raises == ready_opt) ? "权重队列：   " : "限制队列：   ")
+					// << "ready,limit都相等"
+					// << " n1: " << (t1.*tag_field + n1.prop_delta)
+					// << " n2: " << (t2.*tag_field + n2.prop_delta)
+					// << " return: " << (comparison_result ? "true" : "false")
+					// << std::endl;
 
 			return (t1.*tag_field + n1.prop_delta) <
 				(t2.*tag_field + n2.prop_delta);
@@ -1479,7 +1524,7 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 				// 如果两个类型都有客户端存在则重新比较客户端
 
 				ClientRecRef client1 = type1.get_next_process_client();
-				ClientRecRef client2 = type1.get_next_process_client();
+				ClientRecRef client2 = type2.get_next_process_client();
 
 				// 确保转换成功
 				if (!client1 || !client2) {
@@ -1520,7 +1565,7 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	    if (type2.next_process != type2.head) {
 
 				ClientRecRef client1 = type1.get_next_process_client();
-				ClientRecRef client2 = type1.get_next_process_client();
+				ClientRecRef client2 = type2.get_next_process_client();
 
 				// 确保转换成功
 				if (!client1 || !client2) {
@@ -1921,8 +1966,10 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 				// new client entry
 			const ClientInfo* info = client_info_f(client_id);
 			auto client_rec = std::make_shared<ClientRec>(client_id, info, tick, current_burst_client_count);
-			burst_limit_heap.push(client_rec);
-			burst_ready_heap.push(client_rec);
+
+
+			// burst_limit_heap.push(client_rec);
+			// burst_ready_heap.push(client_rec);
 			insert.first->second = std::move(client_rec);
 			}
 			// for convenience, we'll create a reference to the shared pointer
@@ -1930,14 +1977,15 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 
 
 			//  检查该类型是否存在
-			auto insert_type = type_client_map.emplace(client.info, TypeNodeRef{});
-			if(insert_type.second){
+			auto it = type_client_map.find(client.info);
+			if(it == type_client_map.end()) {
 				auto type_rec = std::make_shared<TypeNode>(client.info);
 				type_limit_heap.push(type_rec);
 				type_ready_heap.push(type_rec);
-				insert_type.first->second = std::move(type_rec);
+				it = type_client_map.emplace(client.info, TypeNodeRef{}).first;
+				it->second = std::move(type_rec);
 			}
-			TypeNode& type_client = *insert_type.first->second;
+			TypeNode& type_client = *it->second;
 			// 如果客户端不在类型列表中，则插入到类型队列里面
 			if(client.is_join == false){
 				
@@ -2005,19 +2053,22 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 			}
 
 			client.add_request(tag, std::move(request));
-			if (1 == client.requests.size()) {
-			// NB: can the following 4 calls to adjust be changed
-			// promote? Can adding a request ever demote a client in the
-			// heaps?
-			burst_limit_heap.adjust(client);
-			burst_ready_heap.adjust(client);
-			}
+			// if (1 == client.requests.size()) {
+			// // NB: can the following 4 calls to adjust be changed
+			// // promote? Can adding a request ever demote a client in the
+			// // heaps?
+			// burst_limit_heap.adjust(client);
+			// burst_ready_heap.adjust(client);
+			// }
 
 			client.cur_rho = req_params.rho;
 			client.cur_delta = req_params.delta;
 
-			burst_limit_heap.adjust(client);
-			burst_ready_heap.adjust(client);
+			// burst_limit_heap.adjust(client);
+			// burst_ready_heap.adjust(client);
+
+			type_limit_heap.adjust(type_client);
+			type_ready_heap.adjust(type_client);
 
 			return 0;
       } // do_add_request_burst
@@ -2067,36 +2118,13 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 
 	update_next_tag(TagCalc{}, top, tag);
 
-//	resv_heap.demote(top);
-//	limit_heap.adjust(top);
-//#if USE_PROP_HEAP
-//	prop_heap.demote(top);
-//#endif
-//	ready_heap.demote(top);
+		resv_heap.demote(top);
+		limit_heap.adjust(top);
+	#if USE_PROP_HEAP
+		prop_heap.demote(top);
+	#endif
+		ready_heap.demote(top);
 
-
-	// 出队后只调整对应堆即可
-	if (auto cli_epoch = std::get_if<ClientEpoch>(&top.client_date)) {
-
-
-			// 如果该突发客户端没有后续请求，则暂停计数
-			if(!top.has_request())
-			{
-				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
-				top.idle = true;		//没有请求后立马将客户端设置空闲
-				std::cout<<"没有请求"<<std::endl;
-			}		
-			burst_limit_heap.adjust(top);
-			burst_ready_heap.demote(top);
-
-	}else{
-			resv_heap.demote(top);
-			limit_heap.adjust(top);
-		#if USE_PROP_HEAP
-			prop_heap.demote(top);
-		#endif
-			ready_heap.demote(top);
-	}
 
 
 	// process
@@ -2111,15 +2139,18 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 
       // data_mtx should be held when called; top of heap should have
       // a ready request
-      template<typename C1, IndIntruHeapData ClientRec::*C2, typename C3>
-      RequestTag burst_pop_process_request(IndIntruHeap<C1, ClientRec, C2, C3, B>& heap,
+      template<typename C1, IndIntruHeapData TypeNode::*C2, typename C3>
+      RequestTag burst_pop_process_request(IndIntruHeap<C1, TypeNode, C2, C3, B>& heap,
 			       std::function<void(const C& client,
 						  const Cost cost,
 						  RequestRef& request)> process,
 						  int count) {
-	// gain access to data
-	ClientRec& top = heap.top();
+	// // gain access to data
+	// ClientRec& top = heap.top();
+	// 堆+链表
+	ClientRec& top = *(heap.top().next_process);
 	RequestTag tag = top.next_request().tag;
+	int old_count = count;
 
 	// const Time now = get_time() + top.info->limit_inv;
 	// && top.next_request().tag.limit <= now		// 细粒度限速
@@ -2145,16 +2176,44 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	if (auto cli_epoch = std::get_if<ClientEpoch>(&top.client_date)) {
 
 
-			// 如果该突发客户端没有后续请求，则暂停计数
-			if(!top.has_request())
-			{
-				std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
-				top.idle = true;		//没有请求后立马将客户端设置空闲
-				std::cout<<"没有请求"<<std::endl;
-			}		
-			burst_limit_heap.adjust(top);
-			burst_ready_heap.demote(top);
+			// // 如果该突发客户端没有后续请求，则暂停计数
+			// if(!top.has_request())
+			// {
+			// 	std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
+			// 	top.idle = true;		//没有请求后立马将客户端设置空闲
+			// 	std::cout<<"没有请求"<<std::endl;
+			// }		
+			// burst_limit_heap.adjust(top);
+			// burst_ready_heap.demote(top);
 
+
+			cli_epoch->processed_requests += (old_count-count);
+
+			// 堆+链表的调整
+			auto type_client = type_client_map.find(top.info);
+			if (type_client != type_client_map.end()) {
+
+				// 时间片用完————移动到队尾
+				if(std::get<ClientEpoch>(top.client_date).is_limit == true){
+					type_client->second->move_to_end();
+
+				// 有时间片但是没有请求————从类型队列中删除
+				}else if(!top.has_request()){
+					type_client->second->remove();
+					std::get<ClientEpoch>(top.client_date).end(current_burst_client_count, top.client);
+					top.idle = true;		//没有请求后立马将客户端设置空闲
+					std::cout<<"没有请求"<<std::endl;
+
+				// 有时间片有请求————直接移动到下一个客户端
+				}else{
+					type_client->second->move_next_process();
+				}
+
+
+				// 对该类型进行堆调整
+				type_limit_heap.adjust(*type_client->second);
+				type_ready_heap.demote(*type_client->second);
+			}
 	}
 
 	return tag;
@@ -2280,7 +2339,14 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
         NextReq do_next_request(Time now) {
 	// if reservation queue is empty, all are empty (i.e., no
 	// active clients)
-	if(resv_heap.empty() && burst_ready_heap.empty()) {
+
+	//  原始突发客户端判断是否为空
+	// if(resv_heap.empty() && burst_ready_heap.empty()) {
+	//   return NextReq::none();
+	// }
+
+	// 堆+链表
+	if(resv_heap.empty() && (type_ready_heap.top().has_valid_client == false)) {
 	  return NextReq::none();
 	}
 
@@ -2305,31 +2371,139 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	}
 
 
-	// 突发调度阶段
-	if(!burst_ready_heap.empty()){
+	// // 突发调度阶段
+	// if(!burst_ready_heap.empty()){
 
-		auto limits = &burst_limit_heap.top();
+	// 	auto limits = &burst_limit_heap.top();
 
-		// std::cout<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
+	// 	// std::cout<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
 
+
+	// 	while (limits->has_request() &&
+	// 		!limits->next_request().tag.ready&&
+	// 		limits->next_request().tag.limit <= now) {
+
+	// 			limits->next_request().tag.ready = true;
+	// 			burst_ready_heap.promote(*limits);
+	// 			burst_limit_heap.demote(*limits);
+
+	// 			limits = &burst_limit_heap.top();
+
+	// 	}
+
+
+	// 	auto& readys = burst_ready_heap.top();
+
+
+	// 	// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
+
+	// 	if (readys.has_request() &&
+	// 		readys.next_request().tag.ready &&
+	// 		std::get<ClientEpoch>(readys.client_date).is_limit ==false &&
+	// 		readys.next_request().tag.proportion < max_tag) {
+
+	// 		// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
+
+
+	// 		auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
+	// 		if(state == 1)		//刚启动
+	// 		{
+	// 			readys.next_request().tag.limit = get_time()+readys.info->limit_inv;
+	// 			// std::cout << "初始化限制标签"  << std::endl;
+
+	// 			if (readys.idle) {
+				
+	// 			constexpr double lowest_prop_tag_trigger =
+	// 				std::numeric_limits<double>::max() / 3.0;
+
+	// 			double lowest_prop_tag = std::numeric_limits<double>::max();
+	// 			for (auto const &c : burst_client_map) {
+	// 				// don't use ourselves (or anything else that might be
+	// 				// listed as idle) since we're now in the map
+	// 				if (!c.second->idle) {
+	// 				double p;
+	// 				// use either lowest proportion tag or previous proportion tag
+	// 				if (c.second->has_request()) {
+	// 				p = c.second->next_request().tag.proportion +
+	// 				c.second->prop_delta;
+	// 				} else {
+	// 					p = c.second->get_req_tag().proportion + c.second->prop_delta;
+	// 				}
+
+	// 				if (p < lowest_prop_tag) {
+	// 				lowest_prop_tag = p;
+	// 				}
+	// 				}
+	// 			}
+
+	// 			// if this conditional does not fire, it
+	// 			if (lowest_prop_tag < lowest_prop_tag_trigger) {
+	// 				readys.prop_delta = lowest_prop_tag - readys.prev_tag.proportion;
+	// 			}
+	// 			readys.idle = false;
+	// 			} // if this client was idle
+
+
+
+	// 		}else if(state == 2)		//中间请求
+	// 		{
+				
+	// 		}else if(state == 0){		//时间片耗尽————idle==true
+	// 			readys.idle = true;
+
+	// 			burst_ready_heap.adjust(readys); 
+	// 			// burst_limit_heap.demote(readys);
+
+	// 		}
+
+
+	// 		// 			// 动态生成日志文件名
+    //         // std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
+
+    //         // // 打开对应的日志文件
+    //         // std::ofstream log_file(log_filename, std::ios::app);
+    //         // if (log_file.is_open()) {
+
+    //         // // 记录即将出队的请求的客户端ID
+	// 		// log_file << "周期: " << epoch.num << " " 
+    //         // << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
+	// 		// << "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
+	// 		// << "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
+	// 		// << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
+			
+
+    //         // // 关闭日志文件
+    //         // log_file.close();
+	// 		// }
+
+
+	// 	return NextReq(HeapId::burst);
+	// 	}
+	// }
+
+
+
+
+	// 突发调度阶段————堆+链表
+	if(!type_ready_heap.empty() && type_ready_heap.top().has_valid_client){
+
+		auto limits = type_limit_heap.top().next_process;
 
 		while (limits->has_request() &&
 			!limits->next_request().tag.ready&&
 			limits->next_request().tag.limit <= now) {
 
 				limits->next_request().tag.ready = true;
-				burst_ready_heap.promote(*limits);
-				burst_limit_heap.demote(*limits);
+				auto type_node = type_limit_heap.top();
+				type_ready_heap.promote(type_node);
+				type_limit_heap.demote(type_node);
 
-				limits = &burst_limit_heap.top();
+				limits = type_limit_heap.top().next_process;
 
 		}
 
 
-		auto& readys = burst_ready_heap.top();
-
-
-		// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
+		auto& readys = *(type_ready_heap.top().next_process);
 
 		if (readys.has_request() &&
 			readys.next_request().tag.ready &&
@@ -2385,8 +2559,8 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 			}else if(state == 0){		//时间片耗尽————idle==true
 				readys.idle = true;
 
-				burst_ready_heap.adjust(readys); 
-				// burst_limit_heap.demote(readys);
+				// burst_ready_heap.adjust(readys); 
+				// // burst_limit_heap.demote(readys);
 
 			}
 
@@ -2414,7 +2588,6 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 		return NextReq(HeapId::burst);
 		}
 	}
-
 
 
 
@@ -2461,8 +2634,16 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 					reserv.next_request().tag.reservation < max_tag) {
 				return NextReq(HeapId::reservation);
 			}
-		}else if(!burst_ready_heap.empty()){
-			auto& readys = burst_ready_heap.top();
+		}
+		// else if(!burst_ready_heap.empty()){
+		// 	auto& readys = burst_ready_heap.top();
+		// 	if (readys.has_request() &&
+		// 		readys.next_request().tag.proportion < max_tag) {
+		// 		return NextReq(HeapId::burst);
+		// 	}
+		// }
+		else if(type_ready_heap.top().has_valid_client){
+			auto& readys = *(type_ready_heap.top().next_process);
 			if (readys.has_request() &&
 				readys.next_request().tag.proportion < max_tag) {
 				return NextReq(HeapId::burst);
@@ -2574,7 +2755,8 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	    if (erase_point &&
 	        erased_num < erase_max &&
 	        i2->second->last_tick <= erase_point) {
-	      delete_from_burst_heaps(i2->second);
+
+	    //   delete_from_burst_heaps(i2->second);
 
 		// 从类型链表中删除该客户端
 		auto typenode_iter = type_client_map.find(i2->second->info);
@@ -2632,7 +2814,6 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 		// std::cout<<  std::endl;
 		// std::cout<<"突发客户端编号："<< k++ <<  std::endl;
 
-		  k++;
 		  auto i2 = i++;
 
 		// 重新初始化客户端周期信息
@@ -2654,8 +2835,24 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
   			// cli_epoch->is_limit = false;
 			if(cli_epoch->is_limit == true){
 				cli_epoch->is_limit = false;
-				burst_ready_heap.adjust(*i2->second);
-				// burst_limit_heap.demote(*i2->second);
+				// burst_ready_heap.adjust(*i2->second);
+				// // burst_limit_heap.demote(*i2->second);
+
+
+				auto type_client = type_client_map.find(i2->second->info);
+				if (type_client != type_client_map.end()) {
+					//  如果当前模板节点没有有效客户端这直接设置
+					if (type_client->second->has_valid_client == false) {
+						type_client->second->has_valid_client = true;
+						type_client->second->next_process = type_client->second->head->next;
+						type_ready_heap.adjust(*type_client->second);
+					}
+				}
+
+				// 如果当前客户端没有请求则先从模板节点中删除—————既无时间片有无请求的客户端获取时间片后
+				if(!(i2->second->has_request())){
+					type_client->second->remove(i2->second);
+				}
 			}
 
 			
@@ -2993,8 +3190,22 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	//   break;
 
 
+
+	//  +Ring_Buffer
+	// case super::HeapId::burst:
+	//   (void) super::burst_pop_process_request(this->burst_ready_heap,
+	// 			     burst_process_f(Ring_Buffer, PhaseType::burst),
+	// 				 Ring_Buffer.idle());   
+
+	// 	result = Ring_Buffer.front();
+	// 	Ring_Buffer.pop_front();   
+	//   ++this->burst_sched_count;
+	//   break;
+
+
+	// 堆+链表
 	case super::HeapId::burst:
-	  (void) super::burst_pop_process_request(this->burst_ready_heap,
+	  (void) super::burst_pop_process_request(this->type_ready_heap,
 				     burst_process_f(Ring_Buffer, PhaseType::burst),
 					 Ring_Buffer.idle());   
 
