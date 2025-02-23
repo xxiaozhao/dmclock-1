@@ -159,9 +159,9 @@ int main(int argc, char* argv[]) {
 
     // 创建dmclock队列
     crimson::dmclock::ClientInfo normal_info(0.0, 1.0, 0.0);
-    crimson::dmclock::ClientInfo burst_info(0.0, 100.0, 1000.0, 100, 1000);
-    crimson::dmclock::ClientInfo burst_info_high(0.0, 1.0, 1000.0, 100, 1000);
-
+    crimson::dmclock::ClientInfo burst_info(0.0, 100.0, 1000.0, 100, 1);
+    crimson::dmclock::ClientInfo burst_info_high(0.0, 1.0, 1000.0, 100, 1);
+    
     auto client_info_f = [&](const int& client_id) -> const crimson::dmclock::ClientInfo* {
         if (client_id >= num_normal_clients) { // burst client id
             int burst_client_id = client_id - num_normal_clients;
@@ -320,10 +320,10 @@ int main(int argc, char* argv[]) {
     }
 
 
-//   // 打印每个突发客户端处理的请求数量
-//     for(int i=0;i<every_burst_count.size();i++){
-//         std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
-//     }
+  // 打印每个突发客户端处理的请求数量
+    for(int i=0;i<every_burst_count.size();i++){
+        std::cout <<"客户端"<< i+1<<":"<< every_burst_count[i]<<"\t"<<std::endl;
+    }
 
     // 打印统计信息
     std::cout << "\n=== Final Statistics ===\n"

@@ -86,6 +86,7 @@ namespace crimson {
 	using Clock = std::chrono::steady_clock;
 	using TimePoint = Clock::time_point;
 	using Duration = std::chrono::milliseconds;
+	using Seconds = std::chrono::seconds;
         using MarkPoint = std::pair<TimePoint,Counter>;
 
     enum class AtLimit {
@@ -151,10 +152,11 @@ namespace crimson {
      struct ClientInfo {
       double reservation;  // minimum
       double weight;       // proportional
-      double limit;        // maximum
-	  size_t total_bandwidth; 	//一个周期内的总带宽
-	  size_t b0;		   // 最大突发带宽
+      double limit;        //  最大带宽
+	  size_t total_bandwidth; 	//一个周期内的总流量
+	  size_t size_t_period;		   // 一个周期的大小  (秒)
 	  Duration duration;   //分配时长
+	  Duration period;   	//一个周期的时长(毫秒)
 
       // multiplicative inverses of above, which we use in calculations
       // and don't want to recalculate repeatedly
@@ -168,8 +170,8 @@ namespace crimson {
       }
 
 
-		ClientInfo(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _b0) {
-	update_burst(_reservation, _weight, _limit, _total_bandwidth, _b0);
+		ClientInfo(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _size_t_period) {
+	update_burst(_reservation, _weight, _limit, _total_bandwidth, _size_t_period);
       }
 
 
@@ -179,21 +181,23 @@ namespace crimson {
        weight = _weight;
        limit = _limit;
 	   total_bandwidth = 0;
-	   b0 = 0;
+	   size_t_period = 0;
 	   duration = std::chrono::milliseconds(0);
+	   period = std::chrono::milliseconds(0);
        reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
        weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
        limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
       }
 
 
-	   inline void update_burst(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _b0) {
+	   inline void update_burst(double _reservation, double _weight, double _limit, size_t _total_bandwidth, size_t _size_t_period) {
        reservation = _reservation;
        weight = _weight;
        limit = _limit;
 	   total_bandwidth = _total_bandwidth;
-	   b0 = _b0;
-	   duration = std::chrono::milliseconds((_total_bandwidth*1000)/_b0);		//*1000是因为要转换为毫秒
+	   size_t_period = _size_t_period;
+	   duration = std::chrono::milliseconds((_total_bandwidth*1000)/static_cast<size_t>(_limit));		//*1000是因为要转换为毫秒
+	   period = std::chrono::milliseconds(size_t_period*1000);
        reservation_inv = (0.0 == reservation) ? 0.0 : 1.0 / reservation;
        weight_inv = (0.0 == weight) ? 0.0 : 1.0 / weight;
        limit_inv = (0.0 == limit) ? 0.0 : 1.0 / limit;
@@ -422,6 +426,7 @@ namespace crimson {
       // we don't want to include gtest.h just for FRIEND_TEST
       friend class dmclock_server_client_idle_erase_Test;
       friend class dmclock_server_add_req_pushprio_queue_Test;
+	  friend class TypeNode;
 
       // types used for tag dispatch to select between implementations
       using TagCalc = std::integral_constant<bool, IsDelayed>;
@@ -505,7 +510,7 @@ namespace crimson {
 	Epoch() :
 		begin_time(Clock::now()),
 		num(0),
-		period(std::chrono::milliseconds(1000))
+		period(std::chrono::milliseconds(10))
 		{
 		// empty
 		}
@@ -543,7 +548,7 @@ namespace crimson {
 	class ClientEpoch {
 		friend PriorityQueueBase;
 
-		size_t b0 = 0;			//分配的带宽
+		double b0 = 0;			//分配的带宽
 		size_t burst_client_count = 0;	//开始计时的突发客户端数量
 		int processed_requests = 0;		//计时开始后累计处理的请求数量
 
@@ -551,6 +556,7 @@ namespace crimson {
 		Duration duration;			//分配时长
 		Duration cum_duration;		//周期内累计时长
 		TimePoint begin_time;		//开始计时时间
+		TimePoint period_begin;		//周期开始的时间
 		bool is_cumulative;			//是否在计时
 		bool is_limit;				//是否达到限制时长
 
@@ -570,7 +576,7 @@ namespace crimson {
 		// 构造函数————指定分配时长
 		ClientEpoch(const ClientInfo* client_info, size_t burst_client_counts) :
 
-			b0(client_info->b0),
+			b0(client_info->limit),
 			burst_client_count(burst_client_counts),
 			processed_requests(0),
 
@@ -578,6 +584,7 @@ namespace crimson {
 			duration(client_info->duration),
 			cum_duration(std::chrono::milliseconds(0)),
 			begin_time(Clock::now()),
+			period_begin(Clock::now()),
 			is_cumulative(false),
 			is_limit(false)
 			{
@@ -614,7 +621,7 @@ namespace crimson {
 
 					// 如果time_diff大于等于时间间隔，则重启
 					if (time_diff >= interval) {
-						double time_rate = static_cast<double>(processed_requests) / ((static_cast<double>(b0) * time_interval / 1000.0));
+						double time_rate = static_cast<double>(processed_requests) / ((b0 * time_interval / 1000.0));
 
 
 						// std::cout<<"time_rate:"<<time_rate<<"     b0:"<<b0<<"processed_requests:"<<processed_requests<<std::endl;
@@ -882,7 +889,7 @@ class TypeNode {
 private:
     const crimson::dmclock::ClientInfo* info; // 类型信息
     ClientRecRef head; // 链表头（哨兵节点）
-    ClientRecRef next_process; // 下一个即将处理的节点
+    mutable ClientRecRef next_process; // 下一个即将处理的节点
     size_t client_count = 0; // 链表中有效客户端数量
 	bool has_valid_client = false;
 
@@ -1007,18 +1014,38 @@ public:
 		// std::cout<<"to_end当前模板链表客户端数量:"<<client_count<<std::endl;
     }
 
-    // 移动next_process指针
+	// 移动next_process指针
     ClientRecRef move_next_process() {
-        if (next_process == head) {
-            return next_process;
-        } else if (next_process->next == head || std::get<ClientEpoch>(next_process->next->client_date).is_limit) {
-            next_process = head->next;
-        } else {
-            next_process = next_process->next;
-        }
+		bool is_updata = false;
+		if(next_process->next != head && std::get<ClientEpoch>(next_process->next->client_date).is_limit){
+				is_updata = updata_period(head->next);
+				if(is_updata == true){
+					next_process = next_process->next;
+					if(!(next_process->has_request())){
+						remove();
+					}else if(has_valid_client == false){
+						has_valid_client = true;
+					}
+				}
+		}
+
+
+		if(!is_updata){
+			if (next_process == head) {
+				return next_process;
+			} else if (next_process->next == head || std::get<ClientEpoch>(next_process->next->client_date).is_limit) {
+				next_process = head->next;
+			} else {
+				next_process = next_process->next;
+			}
+		}
+
+        
 
         return next_process;
     }
+
+
 
     // 获取链表中有效客户端数量
     size_t get_client_count() const {
@@ -1034,6 +1061,38 @@ public:
             return next_process;
         }
     }
+
+
+
+	bool updata_period(ClientRecRef cur_client){
+		
+
+		// 重新初始化客户端周期信息
+  		if (auto cli_epoch = std::get_if<ClientEpoch>(&cur_client->client_date)) {
+
+			// 当前时间
+			TimePoint current_time = Clock::now();
+			// 当前时间与开始时间的时间差
+			Duration time_diff = std::chrono::duration_cast<Duration>(current_time - (cli_epoch->period_begin));
+
+			if(time_diff  >= cur_client->info->period){
+
+				cur_client->idle = true;
+				cli_epoch->is_cumulative = false;
+				cli_epoch->cum_duration = std::chrono::milliseconds(0);
+				cli_epoch->begin_time = Clock::now();
+				cli_epoch->period_begin = Clock::now();
+				cli_epoch->is_limit = false;
+
+				return true;
+				
+			}
+     	}
+
+		return false;
+	}
+
+
 };
 
 
@@ -2371,118 +2430,6 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 	}
 
 
-	// // 突发调度阶段
-	// if(!burst_ready_heap.empty()){
-
-	// 	auto limits = &burst_limit_heap.top();
-
-	// 	// std::cout<<"是否有请求："<<limits->has_request()<<" ready:"<<limits->next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(limits->client_date).is_limit<<"是否可调ready:"<<(limits->next_request().tag.limit <= now)<<std::endl;
-
-
-	// 	while (limits->has_request() &&
-	// 		!limits->next_request().tag.ready&&
-	// 		limits->next_request().tag.limit <= now) {
-
-	// 			limits->next_request().tag.ready = true;
-	// 			burst_ready_heap.promote(*limits);
-	// 			burst_limit_heap.demote(*limits);
-
-	// 			limits = &burst_limit_heap.top();
-
-	// 	}
-
-
-	// 	auto& readys = burst_ready_heap.top();
-
-
-	// 	// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
-
-	// 	if (readys.has_request() &&
-	// 		readys.next_request().tag.ready &&
-	// 		std::get<ClientEpoch>(readys.client_date).is_limit ==false &&
-	// 		readys.next_request().tag.proportion < max_tag) {
-
-	// 		// std::cout<<"是否有请求******："<<readys.has_request()<<" ready:"<<readys.next_request().tag.ready<<" is_limit:"<<std::get<ClientEpoch>(readys.client_date).is_limit<<"是否可调ready:"<<(readys.next_request().tag.limit <= now)<<std::endl;
-
-
-	// 		auto state = std::get<ClientEpoch>(readys.client_date).epoch_state(current_burst_client_count, readys.client);
-	// 		if(state == 1)		//刚启动
-	// 		{
-	// 			readys.next_request().tag.limit = get_time()+readys.info->limit_inv;
-	// 			// std::cout << "初始化限制标签"  << std::endl;
-
-	// 			if (readys.idle) {
-				
-	// 			constexpr double lowest_prop_tag_trigger =
-	// 				std::numeric_limits<double>::max() / 3.0;
-
-	// 			double lowest_prop_tag = std::numeric_limits<double>::max();
-	// 			for (auto const &c : burst_client_map) {
-	// 				// don't use ourselves (or anything else that might be
-	// 				// listed as idle) since we're now in the map
-	// 				if (!c.second->idle) {
-	// 				double p;
-	// 				// use either lowest proportion tag or previous proportion tag
-	// 				if (c.second->has_request()) {
-	// 				p = c.second->next_request().tag.proportion +
-	// 				c.second->prop_delta;
-	// 				} else {
-	// 					p = c.second->get_req_tag().proportion + c.second->prop_delta;
-	// 				}
-
-	// 				if (p < lowest_prop_tag) {
-	// 				lowest_prop_tag = p;
-	// 				}
-	// 				}
-	// 			}
-
-	// 			// if this conditional does not fire, it
-	// 			if (lowest_prop_tag < lowest_prop_tag_trigger) {
-	// 				readys.prop_delta = lowest_prop_tag - readys.prev_tag.proportion;
-	// 			}
-	// 			readys.idle = false;
-	// 			} // if this client was idle
-
-
-
-	// 		}else if(state == 2)		//中间请求
-	// 		{
-				
-	// 		}else if(state == 0){		//时间片耗尽————idle==true
-	// 			readys.idle = true;
-
-	// 			burst_ready_heap.adjust(readys); 
-	// 			// burst_limit_heap.demote(readys);
-
-	// 		}
-
-
-	// 		// 			// 动态生成日志文件名
-    //         // std::string log_filename = "a_"+std::to_string(readys.client) + ".txt";
-
-    //         // // 打开对应的日志文件
-    //         // std::ofstream log_file(log_filename, std::ios::app);
-    //         // if (log_file.is_open()) {
-
-    //         // // 记录即将出队的请求的客户端ID
-	// 		// log_file << "周期: " << epoch.num << " " 
-    //         // << "is_limit: " << std::get<ClientEpoch>(readys.client_date).is_limit 
-	// 		// << "is_cumulative: " << std::get<ClientEpoch>(readys.client_date).is_cumulative 
-	// 		// << "cum_duration: " << std::get<ClientEpoch>(readys.client_date).cum_duration.count()
-	// 		// << "累积时长: " << (std::chrono::duration_cast<Duration>(Clock::now() - std::get<ClientEpoch>(readys.client_date).begin_time) + std::get<ClientEpoch>(readys.client_date).cum_duration).count() << " 毫秒" << std::endl;
-			
-
-    //         // // 关闭日志文件
-    //         // log_file.close();
-	// 		// }
-
-
-	// 	return NextReq(HeapId::burst);
-	// 	}
-	// }
-
-
-
 
 	// 突发调度阶段————堆+链表
 	if(!type_ready_heap.empty() && type_ready_heap.top().has_valid_client){
@@ -2802,105 +2749,24 @@ using TypeNodeRef = std::shared_ptr<TypeNode>;
 		// std::cout<<"\ndo_period"<<std::endl;
 		epoch.update_epoch();
 
-	if (!burst_client_map.empty()) {
+		if (!type_client_map.empty()) {
 
+			BurstDataGuard b(burst_data_mtx);
+			int k = 0;
+		
+			for (auto i = type_client_map.begin(); i != type_client_map.end(); /* empty */) {
+				auto i2 = i++;
+				auto type_client = i2->second;
 
-	BurstDataGuard b(burst_data_mtx);
-	int k = 0;
-	
-
-	 for (auto i = burst_client_map.begin(); i != burst_client_map.end(); /* empty */) {
-
-		// std::cout<<  std::endl;
-		// std::cout<<"突发客户端编号："<< k++ <<  std::endl;
-
-		  auto i2 = i++;
-
-		// 重新初始化客户端周期信息
-  		if (auto cli_epoch = std::get_if<ClientEpoch>(&i2->second->client_date)) {
-
-  			
-			i2->second->idle = true;
-
-			if(cli_epoch->is_cumulative == true){
-
-				cli_epoch->is_cumulative = false;
-				current_burst_client_count--;			//这里会瞬减
-				// std::cout<<k-1<<"突发客户端周期结束！"<< "cum_duration" << (cli_epoch->cum_duration).count() << "累积时长" << (std::chrono::duration_cast<Duration>(Clock::now() - cli_epoch->begin_time) + cli_epoch->cum_duration).count() <<std::endl;
-				// std::cout<<"当前突发客户端数量："<< current_burst_client_count << std::endl;
-			}
-
-			cli_epoch->cum_duration = std::chrono::milliseconds(0);
-			cli_epoch->begin_time = Clock::now();
-  			// cli_epoch->is_limit = false;
-			if(cli_epoch->is_limit == true){
-				cli_epoch->is_limit = false;
-				// burst_ready_heap.adjust(*i2->second);
-				// // burst_limit_heap.demote(*i2->second);
-
-
-				auto type_client = type_client_map.find(i2->second->info);
-				if (type_client != type_client_map.end()) {
-					//  如果当前模板节点没有有效客户端这直接设置
-					if (type_client->second->has_valid_client == false) {
-						type_client->second->has_valid_client = true;
-						type_client->second->next_process = type_client->second->head->next;
-						type_ready_heap.adjust(*type_client->second);
-					}
+				//  如果当前模板节点没有有效客户端这直接设置
+				if (type_client->has_valid_client == false && type_client->client_count > 0) {
+					type_client->move_next_process();
+					// type_limit_heap.adjust(*type_client);
+					type_ready_heap.adjust(*type_client);
 				}
-
-				// 如果当前客户端没有请求则先从模板节点中删除—————既无时间片有无请求的客户端获取时间片后
-				if(!(i2->second->has_request())){
-					type_client->second->remove(i2->second);
-				}
-			}
-
-			
-
-     	 	}
-
-        } // for
-
-
-
-		// auto i2 = burst_client_map.begin();
-		// auto limits = &i2->second;
-
-		// while (limits->has_request() &&
-		// 	(!limits->next_request().tag.ready || std::get<ClientEpoch>(limits->client_date).is_limit) &&
-		// 	limits->next_request().tag.limit <= get_time()) 
-		// {
-		// 	// 将请求标记为已准备好
-		// 	limits->next_request().tag.ready = true;
-
-		// 	// 更新堆中的元素
-		// 	burst_ready_heap.promote(*limits);  // 将准备好的请求放入 `ready` 堆
-		// 	burst_limit_heap.demote(*limits);  // 从 `limit` 堆中移除当前请求
-
-		// 	// 更新 `limits` 指针为堆中下一个元素
-		// 	if (!burst_limit_heap.empty()) {
-		// 		limits = &burst_limit_heap.top();  // 取堆顶元素
-		// 	} else {
-		// 		break;  // 如果 `burst_limit_heap` 已空，退出循环
-		// 	}
-		// }
-
-
-
-	}//!burst_client_map.empty()
-
-
-		// //咯咯哒
-		// std::ofstream log_file_period("a_do_period.txt", std::ios::app); // 打开日志文件进行追加
-        // if (log_file_period.is_open()) {
-
-		// 	log_file_period <<"do_period"<< std::endl;
-
-
-        //     log_file_period.close(); // 关闭日志文件
-        // }
-
-      } // do_period
+			} // for
+		}//!burst_client_map.empty()
+    } // do_period
 
 
 
